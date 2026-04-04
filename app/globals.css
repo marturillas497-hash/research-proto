@@ -1,0 +1,62 @@
+@import "tailwindcss";
+
+:root {
+  /* School Identity Colors */
+  --mist-blue: #003366;    /* Deep Navy */
+  --mist-yellow: #FFCC00;  /* School Gold/Yellow */
+  
+  /* System Colors */
+  --background: #f8fafc;   /* Light Slate Background */
+  --foreground: #0f172a;   /* Dark Navy Text */
+  
+  /* Form Visibility Overrides */
+  --border-strong: #94a3b8; /* High-contrast border */
+  --placeholder-text: #475569; /* Darker placeholder for readability */
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-mist-blue: var(--mist-blue);
+  --color-mist-yellow: var(--mist-yellow);
+}
+
+/* Force high-visibility on all inputs */
+input::placeholder, 
+textarea::placeholder {
+  color: var(--placeholder-text) !important;
+  opacity: 1 !important; /* Removes the "low opacity" look */
+}
+
+input, select, textarea {
+  border: 2px solid var(--border-strong) !important;
+  color: #000000 !important;
+  background-color: #ffffff !important;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: 'Inter', Arial, Helvetica, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Smooth transitions for buttons */
+button {
+  transition: all 0.2s ease-in-out;
+}
+
+/* Custom Scrollbar in School Colors */
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #f1f1f1;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--mist-blue);
+  border-radius: 10px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #002244;
+}
