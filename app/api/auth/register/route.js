@@ -10,44 +10,42 @@ export async function POST(request) {
       password, 
       full_name, 
       role, 
-      department_id,
+      department, // CHANGED: v3 uses 'department' (text), not department_id
       year_level,
       section,
       student_id 
     } = body;
 
-    // 1. Create user in Supabase Auth
+    // 1. Create user in Supabase Auth with METADATA
+    // We pass all the extra info into user_metadata so the TRIGGER can grab it
     const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
       email,
       password,
-      email_confirm: true // Auto-confirm for this build
+      email_confirm: true,
+      user_metadata: {
+        full_name,
+        role,
+        department,
+        year_level,
+        section,
+        student_id,
+        status: role === 'research_adviser' ? 'pending' : 'active'
+      }
     });
 
     if (authError) throw authError;
 
-    // 2. Set initial status (Advisers are pending, others active)
-    const initialStatus = role === 'research_adviser' ? 'pending' : 'active';
+    // NOTE: We REMOVED Step 3 (manual insert). 
+    // The Database Trigger 'handle_new_user' now creates the profile automatically 
+    // using the user_metadata we just sent above.
 
-    // 3. Create the profile record
-    const { error: profileError } = await supabaseAdmin
-      .from('profiles')
-      .insert([{
-        id: authData.user.id,
-        full_name,
-        email,
-        role,
-        department_id, // Using the UUID from your new table
-        year_level,
-        section,
-        student_id,
-        status: initialStatus
-      }]);
-
-    if (profileError) throw profileError;
-
-    return NextResponse.json({ message: 'Registration successful', status: initialStatus });
+    return NextResponse.json({ 
+      message: 'Registration successful', 
+      user: authData.user 
+    });
 
   } catch (error) {
+    console.error('Registration Error:', error.message);
     return NextResponse.json({ error: error.message }, { status: 400 });
   }
 }
