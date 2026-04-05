@@ -1,4 +1,5 @@
 // app/api/auth/register/route.js
+
 import { supabaseAdmin } from '@/lib/supabase/service';
 import { NextResponse } from 'next/server';
 
@@ -10,14 +11,13 @@ export async function POST(request) {
       password, 
       full_name, 
       role, 
-      department, // CHANGED: v3 uses 'department' (text), not department_id
+      department_id, // Receives UUID from normalized dropdown
       year_level,
       section,
       student_id 
     } = body;
 
-    // 1. Create user in Supabase Auth with METADATA
-    // We pass all the extra info into user_metadata so the TRIGGER can grab it
+    // 1. Create Auth User with metadata aligned for the SQL Trigger
     const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
       email,
       password,
@@ -25,7 +25,7 @@ export async function POST(request) {
       user_metadata: {
         full_name,
         role,
-        department,
+        department_id, // Passing UUID string to metadata
         year_level,
         section,
         student_id,
@@ -35,17 +35,13 @@ export async function POST(request) {
 
     if (authError) throw authError;
 
-    // NOTE: We REMOVED Step 3 (manual insert). 
-    // The Database Trigger 'handle_new_user' now creates the profile automatically 
-    // using the user_metadata we just sent above.
-
     return NextResponse.json({ 
       message: 'Registration successful', 
-      user: authData.user 
+      status: role === 'research_adviser' ? 'pending' : 'active' 
     });
 
   } catch (error) {
-    console.error('Registration Error:', error.message);
+    console.error('Research-Proto Error:', error.message);
     return NextResponse.json({ error: error.message }, { status: 400 });
   }
 }

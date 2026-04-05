@@ -1,5 +1,6 @@
 // components/Navbar.js
 'use client';
+
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
@@ -19,32 +20,48 @@ export default function Navbar({ profile }) {
   return (
     <nav className="bg-[#003366] border-b-4 border-[#FFCC00] text-white shadow-xl">
       <div className="max-w-7xl mx-auto px-6 flex items-center justify-between h-20">
-        <Link href="/" className="flex items-center space-x-2">
-          <span className="text-[#FFCC00] font-black text-2xl tracking-tighter italic">MIST</span>
+        {/* Branding */}
+        <Link href="/" className="flex items-center space-x-2 group">
+          <span className="text-[#FFCC00] font-black text-2xl tracking-tighter italic group-hover:scale-105 transition-transform">
+            MIST
+          </span>
           <span className="font-bold border-l-2 border-[#FFCC00] pl-2 text-sm uppercase leading-tight">
             Research<br/>System
           </span>
         </Link>
         
         <div className="flex items-center space-x-8">
+          {/* Student Links */}
           {profile.role === 'student' && (
             <>
-              <Link href="/dashboard" className="text-sm font-bold hover:text-[#FFCC00] transition uppercase">My Reports</Link>
-              <Link href="/submit" className="text-sm font-bold bg-[#FFCC00] text-[#003366] px-4 py-2 rounded-lg hover:bg-white transition uppercase">New Check</Link>
+              <Link href="/dashboard" className="text-sm font-bold hover:text-[#FFCC00] transition uppercase tracking-widest">My Reports</Link>
+              <Link href="/submit" className="text-sm font-bold bg-[#FFCC00] text-[#003366] px-4 py-2 rounded-lg hover:bg-white transition uppercase shadow-[4px_4px_0px_0px_rgba(255,255,255,1)] active:shadow-none">New Check</Link>
             </>
           )}
           
+          {/* Adviser Links */}
           {profile.role === 'research_adviser' && (
-            <Link href="/adviser" className="text-sm font-bold hover:text-[#FFCC00] transition uppercase">Monitoring</Link>
+            <Link href="/adviser" className="text-sm font-bold hover:text-[#FFCC00] transition uppercase tracking-widest">Monitoring</Link>
           )}
 
+          {/* Admin Links - Updated to Archive */}
           {profile.role === 'admin' && (
-            <Link href="/admin" className="text-sm font-bold hover:text-[#FFCC00] transition uppercase">Admin Panel</Link>
+            <>
+              <Link href="/admin" className="text-sm font-bold hover:text-[#FFCC00] transition uppercase tracking-widest">Dashboard</Link>
+              <Link href="/admin/archive" className="text-sm font-bold border-2 border-[#FFCC00] px-3 py-1.5 rounded-lg hover:bg-[#FFCC00] hover:text-[#003366] transition uppercase tracking-widest">
+                Archive
+              </Link>
+            </>
           )}
 
-          <Link href="/library" className="text-sm font-bold hover:text-[#FFCC00] transition uppercase">Library</Link>
+          {/* Global Library Link */}
+          <Link href="/library" className="text-sm font-bold hover:text-[#FFCC00] transition uppercase tracking-widest">Library</Link>
 
-          <button onClick={handleSignOut} className="ml-4 text-xs font-black bg-red-700 hover:bg-red-800 px-3 py-2 rounded uppercase border border-red-500">
+          {/* Logout Button */}
+          <button 
+            onClick={handleSignOut} 
+            className="ml-4 text-[10px] font-black bg-red-600 hover:bg-red-700 px-4 py-2 rounded-xl uppercase border-2 border-red-800 shadow-[4px_4px_0px_0px_rgba(153,27,27,1)] active:shadow-none active:translate-y-1 transition-all"
+          >
             Log Out
           </button>
         </div>

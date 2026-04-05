@@ -40,7 +40,7 @@ export default async function AdminDashboardHome() {
           <h2 className="text-xl font-bold mb-2">Quick Actions</h2>
           <p className="text-blue-200 text-sm mb-6">Common administrative tasks for maintaining the MIST research library.</p>
           <div className="flex flex-col space-y-3">
-            <Link href="/admin/abstracts" className="bg-white text-blue-900 py-3 px-4 rounded-xl font-bold text-center hover:bg-blue-50 transition">
+            <Link href="/admin/archive" className="bg-white text-blue-900 py-3 px-4 rounded-xl font-bold text-center hover:bg-blue-50 transition">
               Add New Abstract to Library
             </Link>
             <Link href="/admin/approvals" className="bg-blue-700 text-white py-3 px-4 rounded-xl font-bold text-center hover:bg-blue-800 transition">
