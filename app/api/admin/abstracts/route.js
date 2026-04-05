@@ -10,11 +10,9 @@ export async function POST(request) {
     const body = await request.json();
     const { title, abstract_text, authors, year, department_id, accession_id } = body;
 
-    // 1. Generate the Embedding (Vector) for semantic search
-    // We combine title and abstract text for a richer vector
-    const embedding = await generateEmbedding(`${title} ${abstract_text}`, 'document');
+    // This now generates a 384-dimension vector locally on the server
+    const embedding = await generateEmbedding(`${title} ${abstract_text}`);
 
-    // 2. Save to library
     const { data, error } = await supabaseAdmin
       .from('abstracts')
       .insert([{
@@ -24,7 +22,7 @@ export async function POST(request) {
         year: parseInt(year),
         department_id,
         accession_id,
-        embedding // The 512-float array
+        embedding // Now 384 dimensions
       }])
       .select();
 
