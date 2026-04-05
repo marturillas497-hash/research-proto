@@ -3,78 +3,57 @@
 
 import { useState, useEffect } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { generateEmbedding } from '@/lib/embeddings'; 
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 
-export default function SubmitProposal() {
+export default function StudentSubmitPage() {
   const [loading, setLoading] = useState(false);
-  const [departments, setDepartments] = useState([]);
-  const [formData, setFormData] = useState({
-    title: '',
-    abstract: '',
-    department_id: '', // This MUST be a UUID from the database
-    year: new Date().getFullYear(),
-  });
-  
+  const [userProfile, setUserProfile] = useState(null);
+  const [formData, setFormData] = useState({ title: '', abstract: '' });
+
   const supabase = createClient();
   const router = useRouter();
 
-  // Load actual UUIDs for departments to prevent 400 Bad Request errors
   useEffect(() => {
-    async function fetchDepts() {
-      const { data, error } = await supabase
-        .from('departments')
-        .select('id, code')
-        .order('code', { ascending: true });
-      
-      if (error) console.error("Error fetching departments:", error.message);
-      if (data) setDepartments(data);
+    async function getProfile() {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('full_name, department_id, departments(code)')
+          .eq('id', user.id)
+          .single();
+        setUserProfile({
+          ...profile,
+          department_code: profile?.departments?.code || 'N/A',
+        });
+      }
     }
-    fetchDepts();
+    getProfile();
   }, [supabase]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!formData.department_id) return alert("Please select a department");
-    
+    if (!userProfile?.department_id) return alert("Profile error: Department not found.");
     setLoading(true);
 
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("Auth session missing. Please log in again.");
-
-      // 1. Generate 384-dimension embedding
-      // Combining title and abstract ensures the "NaN% Match" error is avoided 
-      // by providing enough context for the vector model.
-      const textToEmbed = `Title: ${formData.title} Abstract: ${formData.abstract}`;
-      const embedding = await generateEmbedding(textToEmbed);
-
-      if (!embedding || embedding.length !== 384) {
-        throw new Error("Vector generation failed. Check dimension count.");
-      }
-
-      // 2. Insert into 'abstracts' table
-      // Note: We avoid 'accession_id' if it's not in your schema to prevent 400 errors
-      const { error } = await supabase.from('abstracts').insert([
-        {
+      const res = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
           title: formData.title,
-          abstract_text: formData.abstract, 
-          authors: user.user_metadata?.full_name || 'Anonymous Student', 
-          year: formData.year,
-          department_id: formData.department_id, // This is now a verified UUID
-          embedding: embedding, 
-          status: 'pending' 
-        }
-      ]);
+          description: formData.abstract,
+        }),
+      });
 
-      if (error) throw error;
+      const report = await res.json();
+      if (report.error) throw new Error(report.error);
 
-      router.push('/dashboard');
-      router.refresh();
+      router.push(`/dashboard/report/${report.id}`);
     } catch (error) {
-      console.error("Submission Error:", error);
-      alert(`Submission failed: ${error.message}`);
+      console.error("Consultation Error:", error);
+      alert(error.message);
     } finally {
       setLoading(false);
     }
@@ -82,82 +61,65 @@ export default function SubmitProposal() {
 
   return (
     <div className="max-w-4xl mx-auto p-6 sm:p-10 bg-[#F0F0F0] min-h-screen font-sans">
-      <Link href="/dashboard" className="group text-xs font-black text-black uppercase tracking-widest inline-flex items-center mb-8">
-        <span className="p-2 border-4 border-black bg-white group-hover:bg-[#FFCC00] shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] transition-all">
-          ← Back to Dashboard
-        </span>
+      <Link href="/dashboard" className="inline-block border-4 border-black bg-white px-6 py-2 font-black text-xs uppercase shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:bg-[#FFCC00] transition-all mb-8">
+        ← Back to Dashboard
       </Link>
-      
+
       <div className="bg-white border-4 border-black p-8 md:p-12 shadow-[12px_12px_0px_0px_rgba(0,0,0,1)]">
-        <header className="mb-10">
-          <h1 className="text-5xl font-black text-[#003366] uppercase tracking-tighter mb-2 italic">New Proposal</h1>
-          <div className="h-2 w-32 bg-[#FFCC00] border-2 border-black"></div>
+        <header className="mb-10 border-b-4 border-black pb-6">
+          <h1 className="text-5xl font-black text-[#003366] uppercase tracking-tighter italic leading-none">Research Consultant</h1>
+          <p className="mt-4 text-xs font-black uppercase text-black">
+            Analyzing for:{' '}
+            <span className="bg-[#FFCC00] px-2 border-2 border-black ml-1">
+              {userProfile?.department_code || '...'}
+            </span>
+          </p>
+          {userProfile?.full_name && (
+            <p className="mt-1 text-[10px] font-bold uppercase text-slate-400">
+              Logged in as: {userProfile.full_name}
+            </p>
+          )}
         </header>
 
         <form onSubmit={handleSubmit} className="space-y-8">
-          {/* Title Section */}
           <div className="space-y-2">
-            <label className="text-sm font-black text-black uppercase tracking-tight">Research Title</label>
+            <label className="text-xs font-black uppercase tracking-widest text-slate-500">
+              Proposed Research Title
+            </label>
             <input
               required
-              type="text"
-              placeholder="ENTER RESEARCH TITLE..."
-              className="w-full p-4 bg-white border-4 border-black font-bold text-black focus:bg-[#FFCC00] outline-none placeholder:text-gray-300"
-              onChange={(e) => setFormData({...formData, title: e.target.value})}
+              placeholder="ENTER YOUR TITLE..."
+              className="w-full p-4 border-4 border-black font-bold uppercase outline-none focus:bg-[#FFCC00] placeholder:text-slate-200"
+              onChange={(e) => setFormData({ ...formData, title: e.target.value })}
             />
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-            {/* Department Selection */}
-            <div className="space-y-2">
-              <label className="text-sm font-black text-black uppercase tracking-tight">Academic Department</label>
-              <select
-                required
-                className="w-full p-4 bg-white border-4 border-black font-bold text-black focus:bg-[#FFCC00] outline-none appearance-none"
-                value={formData.department_id}
-                onChange={(e) => setFormData({...formData, department_id: e.target.value})}
-              >
-                <option value="">-- SELECT DEPT --</option>
-                {departments.map((dept) => (
-                  <option key={dept.id} value={dept.id}>{dept.code}</option>
-                ))}
-              </select>
-            </div>
-
-            {/* Publication Year */}
-            <div className="space-y-2">
-              <label className="text-sm font-black text-black uppercase tracking-tight">Target Year</label>
-              <input
-                type="number"
-                required
-                className="w-full p-4 bg-white border-4 border-black font-bold text-black focus:bg-[#FFCC00] outline-none"
-                value={formData.year}
-                onChange={(e) => setFormData({...formData, year: parseInt(e.target.value)})}
-              />
-            </div>
-          </div>
-
-          {/* Abstract Body */}
           <div className="space-y-2">
-            <label className="text-sm font-black text-black uppercase tracking-tight">Abstract Summary</label>
+            <label className="text-xs font-black uppercase tracking-widest text-slate-500">
+              Your Idea / Problem Statement
+            </label>
             <textarea
               required
               rows={10}
-              placeholder="DESCRIBE YOUR PROBLEM STATEMENT, METHODOLOGY, AND GOALS..."
-              className="w-full p-4 bg-white border-4 border-black font-medium text-black focus:bg-[#FFCC00] outline-none placeholder:text-gray-300 resize-none"
-              onChange={(e) => setFormData({...formData, abstract: e.target.value})}
+              placeholder="DESCRIBE WHAT YOU WANT TO STUDY..."
+              className="w-full p-4 border-4 border-black font-medium outline-none focus:bg-[#FFCC00] resize-none placeholder:text-slate-200"
+              onChange={(e) => setFormData({ ...formData, abstract: e.target.value })}
             />
           </div>
 
-          {/* Action Button */}
           <button
-            type="submit"
-            disabled={loading}
-            className="w-full py-6 bg-[#003366] text-white border-4 border-black font-black uppercase tracking-[0.25em] text-xl shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] hover:translate-x-[4px] hover:translate-y-[4px] hover:shadow-none transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            disabled={loading || !userProfile}
+            className="w-full py-6 bg-[#003366] text-white border-4 border-black font-black uppercase tracking-[0.3em] text-xl shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] hover:translate-x-[4px] hover:translate-y-[4px] hover:shadow-none transition-all disabled:opacity-50"
           >
-            {loading ? 'CALCULATING VECTORS...' : 'INDEX TO LIBRARY'}
+            {loading ? 'CONSULTING ARCHIVES...' : 'START AI ANALYSIS'}
           </button>
         </form>
+      </div>
+
+      <div className="mt-8 text-center">
+        <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest">
+          Powered by Semantic Vector Search & Gemini AI
+        </p>
       </div>
     </div>
   );
