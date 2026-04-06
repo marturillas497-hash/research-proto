@@ -3,24 +3,22 @@ import { createClient } from '@/lib/supabase/server';
 import { requireAuth } from '@/lib/api-auth';
 import { notFound, redirect } from 'next/navigation';
 import Link from 'next/link';
-import StatusActionButtons from './StatusActionButtons'; // We will create this client component next
+import StatusActionButtons from './StatusActionButtons';
 
 export default async function AdviserReportView({ params }) {
   const { id } = await params;
   const { user } = await requireAuth();
   const supabase = await createClient();
 
-  // 1. Fetch Report with Student Profile
+  // 1. Fetch Report with Student Profile + student_metadata
   const { data: report } = await supabase
     .from('similarity_reports')
     .select(`
       *,
-      profiles:student_id (
+      profiles!student_id (
         full_name,
-        student_id,
-        year_level,
-        section,
-        departments (name)
+        departments (name),
+        student_metadata (lrn, year_level, section)
       )
     `)
     .eq('id', id)
@@ -29,11 +27,10 @@ export default async function AdviserReportView({ params }) {
   if (!report) notFound();
 
   // 2. Security Gate: Only the assigned adviser can view
-  if (report.adviser_id !== user.id) {
-    redirect('/adviser');
-  }
+  if (report.adviser_id !== user.id) redirect('/adviser');
 
-  const score = Math.round(report.similarity_score * 100);
+  const score = Math.round((report.similarity_score || 0) * 100);
+  const student = report.profiles;
 
   return (
     <div className="max-w-7xl mx-auto p-6 sm:p-10 font-sans bg-[#F0F0F0] min-h-screen">
@@ -42,8 +39,8 @@ export default async function AdviserReportView({ params }) {
       </Link>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
-        
-        {/* LEFT COLUMN: The Proposal & AI Analysis */}
+
+        {/* LEFT COLUMN: Proposal & AI Analysis */}
         <div className="lg:col-span-2 space-y-8">
           <div className="bg-white border-4 border-black p-8 shadow-[12px_12px_0px_0px_rgba(0,0,0,1)]">
             <h1 className="text-[10px] font-black bg-black text-white px-2 py-1 uppercase tracking-widest inline-block mb-4">
@@ -72,7 +69,7 @@ export default async function AdviserReportView({ params }) {
           <div className="bg-white border-4 border-black p-8 shadow-[12px_12px_0px_0px_rgba(0,0,0,1)]">
             <h3 className="text-2xl font-black uppercase mb-8 italic border-b-4 border-black pb-2">Top Library Matches</h3>
             <div className="space-y-4">
-              {report.results_json?.map((match, idx) => (
+              {report.results_json?.length > 0 ? report.results_json.map((match, idx) => (
                 <div key={idx} className="border-4 border-black p-4 flex justify-between items-center bg-slate-50 hover:bg-yellow-50 transition-colors">
                   <div>
                     <h4 className="font-black text-[#003366] uppercase text-sm">{match.title}</h4>
@@ -84,26 +81,37 @@ export default async function AdviserReportView({ params }) {
                     {Math.round(match.similarity * 100)}%
                   </div>
                 </div>
-              ))}
+              )) : (
+                <p className="text-slate-300 font-black uppercase text-xs text-center py-8">No matches found in library.</p>
+              )}
             </div>
           </div>
         </div>
 
-        {/* RIGHT COLUMN: Advisor Actions */}
+        {/* RIGHT COLUMN: Adviser Actions */}
         <div className="space-y-8">
           <div className="bg-white border-4 border-black p-8 shadow-[12px_12px_0px_0px_rgba(0,0,0,1)] sticky top-10">
             <h3 className="font-black uppercase text-xs mb-6 border-b-2 border-black pb-2">Review Summary</h3>
-            
-            <div className="mb-8">
+
+            <div className="mb-6">
               <p className="text-[10px] font-black uppercase text-slate-400">Student Name</p>
-              <p className="font-black text-lg uppercase">{report.profiles.full_name}</p>
-              <p className="text-xs font-bold text-slate-500">{report.profiles.student_id}</p>
+              <p className="font-black text-lg uppercase">{student?.full_name || '—'}</p>
+              <p className="text-xs font-bold text-slate-500 uppercase">
+                {student?.student_metadata?.lrn || 'No LRN'}
+              </p>
+              <p className="text-xs font-bold text-slate-400 uppercase mt-1">
+                {student?.student_metadata?.year_level} — {student?.student_metadata?.section}
+              </p>
+              <p className="text-xs font-bold text-slate-400 uppercase">
+                {student?.departments?.name}
+              </p>
             </div>
 
             <div className={`border-4 border-black p-6 text-center mb-8 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] ${
-              report.risk_level === 'RED' ? 'bg-red-500 text-white' : 
-              report.risk_level === 'ORANGE' ? 'bg-orange-500' :
-              report.risk_level === 'YELLOW' ? 'bg-yellow-300' : 'bg-green-400'
+              report.risk_level === 'RED'    ? 'bg-red-500 text-white' :
+              report.risk_level === 'ORANGE' ? 'bg-orange-500 text-black' :
+              report.risk_level === 'YELLOW' ? 'bg-yellow-300 text-black' :
+                                               'bg-green-400 text-black'
             }`}>
               <div className="text-5xl font-black">{score}%</div>
               <div className="text-[10px] font-black uppercase tracking-widest border-t-2 border-current mt-1 pt-1">
@@ -111,11 +119,10 @@ export default async function AdviserReportView({ params }) {
               </div>
             </div>
 
-            {/* Client Component for Interactive Buttons */}
-            <StatusActionButtons 
-              reportId={report.id} 
-              currentStatus={report.status} 
-              initialRemarks={report.adviser_remarks} 
+            <StatusActionButtons
+              reportId={report.id}
+              currentStatus={report.status}
+              initialRemarks={report.adviser_remarks}
             />
           </div>
         </div>

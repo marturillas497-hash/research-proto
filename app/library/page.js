@@ -1,3 +1,4 @@
+// app/library/page.js
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -10,93 +11,89 @@ export default function LibraryPage() {
   const [departments, setDepartments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [filters, setFilters] = useState({ dept: '', year: '' });
+  const [filters, setFilters] = useState({ dept: '' });
   
   const [profile, setProfile] = useState(null);
   const [selectedItem, setSelectedItem] = useState(null);
   const [isEditing, setIsEditing] = useState(false);
   const [saveLoading, setSaveLoading] = useState(false);
+  const [isSemanticActive, setIsSemanticActive] = useState(false);
 
   const supabase = createClient();
 
-  // --- 1. INSTANT CLIENT-SIDE FILTER ---
-  // This handles basic keyword filtering as the user types
+  // --- 1. THE HYBRID SEARCH LOGIC ---
   useEffect(() => {
-    const filtered = allAbstracts.filter(item => {
-      const searchTerm = search.toLowerCase();
-      const matchesSearch = 
-        item.title.toLowerCase().includes(searchTerm) || 
-        item.abstract_text.toLowerCase().includes(searchTerm) ||
-        (item.authors && item.authors.toLowerCase().includes(searchTerm));
-      
-      const matchesDept = filters.dept ? item.department_id === filters.dept : true;
-      return matchesSearch && matchesDept;
-    });
-    setDisplayAbstracts(filtered);
-  }, [search, filters.dept, allAbstracts]);
+    if (isSemanticActive) return;
 
-  // --- 2. SEMANTIC SEARCH (Local AI 384-dim) ---
-  const handleSemanticSearch = async (e) => {
+    const query = search.trim();
+    const wordCount = query.split(/\s+/).filter(w => w.length > 0).length;
+
+    if (wordCount < 3) {
+      const filtered = allAbstracts.filter(item => {
+        const searchTerm = query.toLowerCase();
+        const matchesKeyword = 
+          item.title.toLowerCase().includes(searchTerm) || 
+          item.abstract_text.toLowerCase().includes(searchTerm) ||
+          (item.authors && item.authors.toLowerCase().includes(searchTerm));
+        
+        const matchesDept = filters.dept ? item.department_id === filters.dept : true;
+        return matchesKeyword && matchesDept;
+      });
+      setDisplayAbstracts(filtered);
+    }
+  }, [search, filters.dept, allAbstracts, isSemanticActive]);
+
+  const handleSearchTrigger = async (e) => {
     if (e) e.preventDefault();
-    const words = search.trim().split(/\s+/);
     
-    // Trigger AI search only if query is substantial (3+ words)
-    if (words.length >= 3) {
+    const query = search.trim();
+    const wordCount = query.split(/\s+/).filter(w => w.length > 0).length;
+
+    if (wordCount >= 3) {
       setLoading(true);
+      setIsSemanticActive(true);
       try {
-        console.log("🧠 Generating local 384-dim embedding...");
-        const queryVector = await generateEmbedding(search);
+        const queryVector = await generateEmbedding(query);
 
         const { data, error } = await supabase.rpc('match_abstracts', {
           query_embedding: queryVector,
-          match_threshold: 0.2, 
+          match_threshold: 0.18, 
           match_count: 25,
-          filter_dept: (filters.dept && filters.dept !== "") ? filters.dept : null, 
-          filter_year: filters.year ? parseInt(filters.year) : null
+          filter_dept: filters.dept || null
         });
 
         if (error) throw error;
         setDisplayAbstracts(data || []);
-      } catch (error) {
-        console.error("SEMANTIC_SEARCH_ERROR:", error.message);
+      } catch (err) {
+        console.error("SEARCH_ERROR:", err.message);
+        setIsSemanticActive(false);
       } finally {
         setLoading(false);
       }
     }
   };
 
-  // --- 3. INITIAL DATA LOAD ---
+  // --- 2. INITIAL DATA LOAD ---
   useEffect(() => {
-    async function getInitialData() {
-      try {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user) {
-          const { data: prof } = await supabase.from('profiles').select('*').eq('id', user.id).single();
-          setProfile(prof);
-        }
-        
-        const { data: depts } = await supabase.from('departments').select('*').order('code');
-        setDepartments(depts || []);
-        
-        const { data: initial } = await supabase
-          .from('abstracts')
-          .select('*')
-          .order('created_at', { ascending: false })
-          .limit(50);
-        
-        setAllAbstracts(initial || []);
-      } catch (err) {
-        console.error("Initial Load Error:", err);
-      } finally {
-        setLoading(false);
+    async function loadData() {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const { data: prof } = await supabase.from('profiles').select('*').eq('id', user.id).single();
+        setProfile(prof);
       }
+      const { data: depts } = await supabase.from('departments').select('*').order('code');
+      setDepartments(depts || []);
+      
+      const { data: initial } = await supabase.from('abstracts').select('*').order('created_at', { ascending: false }).limit(50);
+      setAllAbstracts(initial || []);
+      setLoading(false);
     }
-    getInitialData();
+    loadData();
   }, [supabase]);
 
-  // --- 4. ADMIN ACTIONS (DELETE / EDIT) ---
+  // --- 3. ADMIN ACTIONS ---
   const handleDelete = async (id) => {
-    if (!confirm("🚨 Permanently delete this research?")) return;
+    if (!confirm("🚨 Delete this research permanently?")) return;
     const { error } = await supabase.from('abstracts').delete().eq('id', id);
     if (!error) {
       setSelectedItem(null);
@@ -116,21 +113,12 @@ export default function LibraryPage() {
     };
 
     try {
-      // Re-generate embedding because text content changed
-      const embedding = await generateEmbedding(`${updatedFields.title} ${updatedFields.abstract_text}`);
-      
-      const { error } = await supabase
-        .from('abstracts')
-        .update({ ...updatedFields, embedding })
-        .eq('id', selectedItem.id);
-
+      const embedding = await generateEmbedding(`${updatedFields.title}: ${updatedFields.abstract_text}`);
+      const { error } = await supabase.from('abstracts').update({ ...updatedFields, embedding }).eq('id', selectedItem.id);
       if (error) throw error;
-      
       setIsEditing(false);
       setSelectedItem(null);
-      // Refresh the master list
-      const { data } = await supabase.from('abstracts').select('*').limit(50);
-      setAllAbstracts(data || []);
+      setAllAbstracts(prev => prev.map(item => item.id === selectedItem.id ? { ...item, ...updatedFields, embedding } : item));
     } catch (err) {
       alert(err.message);
     } finally {
@@ -140,125 +128,144 @@ export default function LibraryPage() {
 
   return (
     <div className="max-w-7xl mx-auto p-6 sm:p-10 font-sans text-[#003366]">
-      <div className="flex justify-between items-end mb-8">
+      <header className="mb-10 flex justify-between items-start">
         <div>
-          <h1 className="text-4xl font-black uppercase tracking-tighter italic leading-none">Research Library</h1>
-          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] mt-2">Semantic Archive v2.0 (Local AI Enabled)</p>
+          <h1 className="text-4xl font-black uppercase italic tracking-tighter">Research Library</h1>
+          <div className="flex items-center gap-2 mt-2">
+            <div className={`h-2 w-2 rounded-full ${isSemanticActive ? 'bg-emerald-500 animate-pulse' : 'bg-slate-300'}`}></div>
+            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+              {isSemanticActive ? 'Deep Topic Search Active' : 'Live Filtering'}
+            </p>
+          </div>
         </div>
-      </div>
+        {isSemanticActive && (
+          <button 
+            onClick={() => {setSearch(''); setIsSemanticActive(false);}}
+            className="text-[10px] font-black border-2 border-[#003366] px-3 py-1 uppercase hover:bg-[#FFCC00] transition-colors"
+          >
+            Clear Results ✕
+          </button>
+        )}
+      </header>
 
-      {/* --- SEARCH INTERFACE --- */}
-      <form onSubmit={handleSemanticSearch} className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-10 bg-white p-4 rounded-[2rem] border-4 border-[#003366] shadow-[8px_8px_0px_0px_rgba(0,51,102,1)]">
+      {/* --- SEARCH FORM --- */}
+      <form onSubmit={handleSearchTrigger} className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4 bg-white p-4 border-4 border-[#003366] shadow-[8px_8px_0px_0px_rgba(0,51,102,1)]">
         <input
           type="text"
-          placeholder="Keyword filter... (Type 3+ words & Enter for AI)"
-          className="md:col-span-2 p-4 bg-slate-50 border-none rounded-xl font-bold text-[#003366] outline-none"
+          placeholder="Search topics or titles..."
+          className="md:col-span-2 p-4 font-bold outline-none bg-slate-50 text-[#003366]"
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => {
+            setSearch(e.target.value);
+            if (e.target.value === '') setIsSemanticActive(false);
+          }}
         />
         <select 
-          className="p-4 bg-slate-50 border-none rounded-xl font-bold text-[#003366] outline-none"
+          className="p-4 font-bold outline-none bg-slate-50 text-[#003366]"
           value={filters.dept}
-          onChange={(e) => setFilters({...filters, dept: e.target.value})}
+          onChange={(e) => setFilters({dept: e.target.value})}
         >
           <option value="">All Departments</option>
           {departments.map(d => <option key={d.id} value={d.id}>{d.code}</option>)}
         </select>
-        <button type="submit" className="bg-[#003366] text-[#FFCC00] font-black uppercase tracking-widest rounded-xl hover:scale-[1.02] active:scale-95 transition-all">
+        <button type="submit" className="bg-[#003366] text-[#FFCC00] font-black uppercase tracking-widest hover:brightness-110 active:scale-95 transition-all">
           {loading ? '...' : 'Search'}
         </button>
       </form>
 
-      {/* --- RESULTS GRID --- */}
-      {loading && allAbstracts.length === 0 ? (
-        <div className="text-center py-20 font-black text-[#003366] uppercase animate-pulse tracking-widest">Waking up AI...</div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-          {displayAbstracts.map((item) => (
-            <div 
-              key={item.id} 
-              onClick={() => setSelectedItem(item)}
-              className="cursor-pointer bg-white p-8 rounded-[2rem] border-4 border-[#003366] shadow-[8px_8px_0px_0px_rgba(0,51,102,1)] hover:translate-y-[-4px] transition-all flex flex-col group relative"
-            >
-              <div className="flex justify-between items-start mb-4">
-                <div className="flex flex-col gap-2">
-                  <span className="text-[10px] font-black text-white bg-[#003366] px-3 py-1 rounded-full uppercase w-fit">
-                    {departments.find(d => d.id === item.department_id)?.code || 'N/A'}
-                  </span>
-                  {item.similarity && (
-                    <span className="text-[10px] font-black text-emerald-600 bg-emerald-50 px-2 py-1 rounded border-2 border-emerald-200 w-fit italic">
-                      {Math.round(item.similarity * 100)}% Match
-                    </span>
-                  )}
-                </div>
-                <span className="font-mono text-sm font-black text-[#003366] opacity-30">{item.year}</span>
-              </div>
-              <h3 className="text-xl font-black text-[#003366] uppercase leading-tight mb-4 group-hover:underline line-clamp-2">{item.title}</h3>
-              <p className="text-slate-500 text-sm line-clamp-3 mb-6 font-medium leading-relaxed">{item.abstract_text}</p>
-              <div className="mt-auto pt-4 border-t-2 border-slate-100 flex items-center justify-between">
-                <p className="text-[10px] font-black uppercase text-slate-400 truncate w-2/3">By {item.authors}</p>
-                <span className="text-[#003366] font-black text-xs">OPEN →</span>
-              </div>
-            </div>
-          ))}
-          
-          {displayAbstracts.length === 0 && (
-            <div className="col-span-full text-center py-20 bg-slate-50 rounded-[3rem] border-4 border-dashed border-slate-200">
-               <p className="font-black text-slate-400 uppercase tracking-widest">No matching research found.</p>
-            </div>
-          )}
+      {/* --- RE-WRITTEN USER NOTE --- */}
+      <div className="px-4 mb-10 flex items-center gap-3">
+        <div className="flex space-x-1">
+          <div className="w-1 h-1 bg-[#003366] rounded-full animate-bounce"></div>
+          <div className="w-1 h-1 bg-[#003366] rounded-full animate-bounce [animation-delay:0.2s]"></div>
         </div>
-      )}
+        <p className="text-[10px] font-bold uppercase tracking-tight text-slate-500">
+          💡 <span className="text-[#003366]">Pro Tip:</span> Enter <span className="bg-[#FFCC00] text-black px-1 font-black">3+ words</span> to search by topic relevance instead of just exact matches.
+        </p>
+      </div>
 
-      {/* --- MODAL VIEW/EDIT --- */}
+      {/* --- RESULTS --- */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+        {displayAbstracts.map((item) => (
+          <div 
+            key={item.id} 
+            onClick={() => setSelectedItem(item)}
+            className="cursor-pointer bg-white p-8 border-4 border-[#003366] shadow-[6px_6px_0px_0px_rgba(0,51,102,1)] hover:translate-y-[-4px] hover:shadow-[10px_10px_0px_0px_rgba(0,51,102,1)] transition-all flex flex-col h-full"
+          >
+            <div className="flex justify-between items-start mb-4">
+              <span className="text-[9px] font-black bg-[#003366] text-white px-2 py-1 uppercase">
+                {departments.find(d => d.id === item.department_id)?.code}
+              </span>
+              {item.similarity && (
+                <span className="text-[9px] font-black text-emerald-600 bg-emerald-50 px-2 py-1 border border-emerald-200 uppercase italic">
+                  {Math.round(item.similarity * 100)}% Topic Match
+                </span>
+              )}
+            </div>
+            <h3 className="font-black uppercase text-base mb-4 leading-tight text-[#003366] line-clamp-2">{item.title}</h3>
+            <p className="text-xs text-slate-500 line-clamp-4 leading-relaxed mb-6">{item.abstract_text}</p>
+            <div className="mt-auto pt-4 border-t-2 border-slate-50 flex justify-between items-center">
+              <span className="text-[9px] font-black text-slate-300 uppercase truncate w-2/3">By {item.authors}</span>
+              <span className="text-[#003366] font-black text-[10px]">READ MORE →</span>
+            </div>
+          </div>
+        ))}
+        {displayAbstracts.length === 0 && (
+          <div className="col-span-full py-20 text-center border-4 border-dashed border-slate-200 rounded-xl">
+             <p className="font-black text-slate-300 uppercase tracking-widest">No matching research found</p>
+          </div>
+        )}
+      </div>
+
+      {/* --- MODAL VIEW / EDIT (Remains unchanged for admin) --- */}
       {selectedItem && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-[#003366]/80 backdrop-blur-md">
-          <div className="bg-white w-full max-w-3xl max-h-[90vh] overflow-y-auto rounded-[3rem] border-4 border-[#003366] shadow-[20px_20px_0px_0px_rgba(255,204,0,1)] p-10 relative">
-            <button onClick={() => {setSelectedItem(null); setIsEditing(false);}} className="absolute top-8 right-8 font-black text-2xl text-[#003366] hover:rotate-90 transition-transform">✕</button>
-
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-[#003366]/90 backdrop-blur-sm">
+          <div className="bg-white w-full max-w-3xl max-h-[90vh] overflow-y-auto border-4 border-[#003366] shadow-[15px_15px_0px_0px_rgba(255,204,0,1)] p-10 relative">
+            <button onClick={() => {setSelectedItem(null); setIsEditing(false);}} className="absolute top-6 right-6 font-black text-xl hover:rotate-90 transition-transform">✕</button>
+            
             <form onSubmit={handleUpdate}>
               <div className="mb-8">
                 {isEditing ? (
-                  <input name="title" defaultValue={selectedItem.title} className="w-full text-2xl font-black text-[#003366] uppercase mt-4 p-4 bg-slate-50 rounded-xl border-b-4 border-[#FFCC00] outline-none" />
+                  <input name="title" defaultValue={selectedItem.title} className="w-full text-2xl font-black text-[#003366] uppercase p-4 bg-slate-50 border-b-4 border-[#FFCC00] outline-none" />
                 ) : (
-                  <h2 className="text-3xl font-black text-[#003366] uppercase tracking-tighter mt-4 leading-[1.1]">{selectedItem.title}</h2>
+                  <h2 className="text-3xl font-black text-[#003366] uppercase leading-tight">{selectedItem.title}</h2>
                 )}
               </div>
 
-              <div className="space-y-8">
+              <div className="space-y-6">
                 <div>
-                  <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Research Abstract</h4>
+                  <h4 className="text-[10px] font-black text-slate-300 uppercase tracking-widest mb-2">Research Abstract</h4>
                   {isEditing ? (
-                    <textarea name="abstract_text" rows={10} defaultValue={selectedItem.abstract_text} className="w-full p-6 bg-slate-50 border-2 border-[#003366] rounded-3xl outline-none font-medium text-slate-700" />
+                    <textarea name="abstract_text" rows={10} defaultValue={selectedItem.abstract_text} className="w-full p-6 bg-slate-50 border-2 border-[#003366] outline-none text-sm" />
                   ) : (
-                    <p className="text-slate-700 leading-relaxed font-medium bg-slate-50 p-8 rounded-[2rem] whitespace-pre-wrap text-sm shadow-inner">{selectedItem.abstract_text}</p>
+                    <p className="text-sm text-slate-700 leading-relaxed bg-slate-50 p-6 whitespace-pre-wrap italic">{selectedItem.abstract_text}</p>
                   )}
                 </div>
                 
                 <div className="grid grid-cols-2 gap-6">
-                   <div className="flex flex-col">
-                      <span className="text-[10px] font-black text-slate-300 uppercase mb-1">Lead Authors</span>
-                      {isEditing ? <input name="authors" defaultValue={selectedItem.authors} className="p-3 bg-slate-50 rounded-lg font-bold" /> : <span className="font-black text-[#003366] uppercase">{selectedItem.authors}</span>}
-                   </div>
-                   <div className="flex flex-col">
-                      <span className="text-[10px] font-black text-slate-300 uppercase mb-1">Academic Year</span>
-                      {isEditing ? <input name="year" defaultValue={selectedItem.year} className="p-3 bg-slate-50 rounded-lg font-bold" /> : <span className="font-black text-[#003366]">{selectedItem.year}</span>}
-                   </div>
+                  <div className="flex flex-col">
+                    <span className="text-[10px] font-black text-slate-300 uppercase mb-1">Authors</span>
+                    {isEditing ? <input name="authors" defaultValue={selectedItem.authors} className="p-3 bg-slate-50 font-bold outline-none" /> : <span className="font-bold text-[#003366] uppercase">{selectedItem.authors}</span>}
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="text-[10px] font-black text-slate-300 uppercase mb-1">Year</span>
+                    {isEditing ? <input name="year" defaultValue={selectedItem.year} className="p-3 bg-slate-50 font-bold outline-none" /> : <span className="font-bold text-[#003366]">{selectedItem.year}</span>}
+                  </div>
                 </div>
               </div>
 
               {profile?.role === 'admin' && (
-                <div className="mt-12 pt-8 border-t-4 border-slate-50 flex gap-4">
+                <div className="mt-10 pt-8 border-t-4 border-slate-50 flex gap-4">
                   {!isEditing ? (
                     <>
-                      <button type="button" onClick={() => handleDelete(selectedItem.id)} className="px-8 py-4 bg-red-50 text-red-600 rounded-2xl font-black uppercase text-xs hover:bg-red-600 hover:text-white transition-all">Delete</button>
-                      <button type="button" onClick={() => setIsEditing(true)} className="flex-1 px-8 py-4 bg-[#003366] text-white rounded-2xl font-black uppercase text-xs hover:brightness-110 transition-all shadow-lg">Edit Record</button>
+                      <button type="button" onClick={() => handleDelete(selectedItem.id)} className="px-6 py-3 bg-red-50 text-red-600 font-black uppercase text-[10px] hover:bg-red-600 hover:text-white transition-all">Delete Record</button>
+                      <button type="button" onClick={() => setIsEditing(true)} className="flex-1 px-6 py-3 bg-[#003366] text-white font-black uppercase text-[10px] shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]">Edit Details</button>
                     </>
                   ) : (
                     <>
-                      <button type="button" onClick={() => setIsEditing(false)} className="px-8 py-4 bg-slate-100 text-slate-500 rounded-2xl font-black uppercase text-xs">Cancel</button>
-                      <button type="submit" disabled={saveLoading} className="flex-1 px-8 py-4 bg-green-600 text-white rounded-2xl font-black uppercase text-xs hover:bg-green-700 transition-all shadow-lg">
-                        {saveLoading ? 'RE-INDEXING AI...' : 'SAVE & UPDATE'}
+                      <button type="button" onClick={() => setIsEditing(false)} className="px-6 py-3 bg-slate-100 text-slate-500 font-black uppercase text-[10px]">Cancel</button>
+                      <button type="submit" disabled={saveLoading} className="flex-1 px-6 py-3 bg-green-600 text-white font-black uppercase text-[10px] shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]">
+                        {saveLoading ? 'Updating Topic Map...' : 'Save Updates'}
                       </button>
                     </>
                   )}

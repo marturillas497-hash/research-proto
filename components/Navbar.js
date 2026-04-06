@@ -35,6 +35,7 @@ export default function Navbar({ profile }) {
           {profile.role === 'student' && (
             <>
               <Link href="/dashboard" className="text-sm font-bold hover:text-[#FFCC00] transition uppercase tracking-widest">My Reports</Link>
+              <Link href="/profile" className="text-sm font-bold hover:text-[#FFCC00] transition uppercase tracking-widest">Profile</Link>
               <Link href="/submit" className="text-sm font-bold bg-[#FFCC00] text-[#003366] px-4 py-2 rounded-lg hover:bg-white transition uppercase shadow-[4px_4px_0px_0px_rgba(255,255,255,1)] active:shadow-none">New Check</Link>
             </>
           )}

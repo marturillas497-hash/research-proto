@@ -57,6 +57,16 @@ export async function middleware(request) {
       const dest = profile.role === 'admin' ? '/admin' : profile.role === 'research_adviser' ? '/adviser' : '/dashboard';
       return NextResponse.redirect(new URL(dest, request.url));
     }
+
+    if (path.startsWith('/dashboard') && profile?.role === 'admin') {
+      return NextResponse.redirect(new URL('/admin', request.url));
+    }
+
+    if (path === '/login' && profile?.status === 'active') {
+      const dest = profile.role === 'admin' ? '/admin' : 
+                  profile.role === 'research_adviser' ? '/adviser' : '/dashboard';
+      return NextResponse.redirect(new URL(dest, request.url));
+    }
   }
 
   return response;

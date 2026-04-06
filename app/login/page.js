@@ -1,4 +1,3 @@
-// app/login/page.js
 'use client';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
@@ -21,8 +20,8 @@ export default function LoginPage() {
     full_name: '', 
     role: 'student',
     department_id: '', 
-    adviser_id: '', // New optional field
-    student_id: '', 
+    adviser_id: '', 
+    lrn: '', // Updated from student_id to match normalized schema
     year_level: '', 
     section: ''
   });
@@ -52,7 +51,7 @@ export default function LoginPage() {
         .select('id, full_name')
         .eq('role', 'research_adviser')
         .eq('department_id', formData.department_id)
-        .eq('status', 'active'); // Only show verified advisers
+        .eq('status', 'active'); 
 
       if (data) setAvailableAdvisers(data);
     }
@@ -65,6 +64,7 @@ export default function LoginPage() {
     setError(null);
 
     if (isRegistering) {
+      // POSTing to /api/auth/register
       const res = await fetch('/api/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -84,7 +84,7 @@ export default function LoginPage() {
           const { error: LError } = await supabase.auth.signInWithPassword({
             email: formData.email, password: formData.password
           });
-          if (!LError) router.refresh();
+          if (!LError) router.push('/dashboard'); // Explicitly push to refresh session
         }
       }
     } else {
@@ -95,7 +95,7 @@ export default function LoginPage() {
         setError(authError.message);
         setLoading(false);
       } else {
-        router.refresh();
+        router.push('/dashboard');
       }
     }
   };
@@ -170,7 +170,6 @@ export default function LoginPage() {
                 onChange={(e) => setFormData({ ...formData, full_name: e.target.value })}
               />
               
-              {/* Department Dropdown */}
               <select 
                 className="w-full p-3.5 bg-slate-50 border-none rounded-2xl text-sm font-medium text-slate-600 outline-none focus:ring-2 focus:ring-[#003366]"
                 required
@@ -185,7 +184,6 @@ export default function LoginPage() {
 
               {formData.role === 'student' && (
                 <div className="space-y-4">
-                  {/* Adviser Dropdown (Optional & Filtered) */}
                   <select 
                     className={`w-full p-3.5 bg-slate-50 border-none rounded-2xl text-sm font-medium outline-none focus:ring-2 focus:ring-[#003366] ${
                       !formData.department_id ? 'opacity-50 cursor-not-allowed' : 'text-slate-600'
@@ -194,7 +192,7 @@ export default function LoginPage() {
                     disabled={!formData.department_id}
                     onChange={(e) => setFormData({ ...formData, adviser_id: e.target.value })}
                   >
-                    <option value="">Assigned Adviser (can be changed/added later)</option>
+                    <option value="">Assigned Adviser (Optional)</option>
                     {availableAdvisers.map(adv => (
                       <option key={adv.id} value={adv.id}>{adv.full_name}</option>
                     ))}
@@ -202,10 +200,10 @@ export default function LoginPage() {
 
                   <input
                     type="text"
-                    placeholder="ID Number"
+                    placeholder="LRN (Learner Reference No.)"
                     className="w-full p-4 bg-slate-50 border-none rounded-2xl font-medium"
                     required
-                    onChange={(e) => setFormData({ ...formData, student_id: e.target.value })}
+                    onChange={(e) => setFormData({ ...formData, lrn: e.target.value })}
                   />
                   <div className="grid grid-cols-2 gap-3">
                     <input

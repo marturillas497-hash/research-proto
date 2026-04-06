@@ -11,11 +11,12 @@ export default function ResearchArchivePage() {
   const [message, setMessage] = useState({ type: '', text: '' });
   const [departments, setDepartments] = useState([]);
   const [selectedDept, setSelectedDept] = useState('');
+  const [suggestedId, setSuggestedId] = useState('');
   const [lastId, setLastId] = useState(null);
 
   const supabase = createClient();
 
-  // Fetch departments (using UUID for value)
+  // 1. Fetch departments on mount
   useEffect(() => {
     async function getDepts() {
       const { data } = await supabase.from('departments').select('*').order('code');
@@ -24,23 +25,37 @@ export default function ResearchArchivePage() {
     getDepts();
   }, [supabase]);
 
-  // Fetch last Accession ID to help the librarian with sequencing
+  // 2. Fetch last Accession ID and calculate next suggestion
   useEffect(() => {
     async function fetchLastId() {
-      if (!selectedDept) { setLastId(null); return; }
+      if (!selectedDept) { 
+        setLastId(null); 
+        setSuggestedId('');
+        return; 
+      }
       
       const { data, error } = await supabase
         .from('abstracts')
         .select('accession_id')
-        .eq('department_id', selectedDept) // UUID filter 
+        .eq('department_id', selectedDept)
         .order('created_at', { ascending: false })
         .limit(1);
 
-      if (error) {
-        console.error("Fetch Error:", error);
-        setLastId('Error fetching');
+      if (!error && data.length > 0) {
+        const last = data[0].accession_id;
+        setLastId(last);
+        
+        // Auto-increment logic: Find trailing numbers (e.g., "CS-001" -> "CS-002")
+        const match = last.match(/(\d+)$/);
+        if (match) {
+          const nextNum = parseInt(match[1]) + 1;
+          const padding = match[1].length;
+          const nextStr = last.replace(/\d+$/, String(nextNum).padStart(padding, '0'));
+          setSuggestedId(nextStr);
+        }
       } else {
-        setLastId(data.length > 0 ? data[0].accession_id : 'None (First Entry)');
+        setLastId('None (First Entry)');
+        setSuggestedId('');
       }
     }
     fetchLastId();
@@ -48,20 +63,21 @@ export default function ResearchArchivePage() {
 
   const handleArchive = async (e) => {
     e.preventDefault();
-    setLoading(true);
-    setMessage({ type: 'info', text: '📡 GENERATING SEMANTIC VECTOR...' });
-
     const formData = new FormData(e.target);
+    const abstract_text = formData.get('abstract_text');
+    const title = formData.get('title').trim();
+    const accession_id = formData.get('accession_id').trim();
+
+    setLoading(true);
+    // Notify librarian that the first run takes longer due to model download
+    setMessage({ type: 'info', text: '📡 INITIALIZING SEMANTIC ENGINE (45MB DOWNLOAD ON FIRST RUN)...' });
 
     try {
-      const title = formData.get('title');
-      const abstract_text = formData.get('abstract_text');
-
-      // Generate 384-dim embedding
+      // Generate 384-dim embedding via Xenova/Transformers
       const embedding = await generateEmbedding(`${title}: ${abstract_text}`);
 
       if (!embedding || embedding.length !== 384) {
-        throw new Error("Vector generation failed dimension check (Required: 384).");
+        throw new Error("Vector dimension mismatch. Expected 384 dimensions.");
       }
 
       const { error } = await supabase.from('abstracts').insert([{
@@ -70,16 +86,20 @@ export default function ResearchArchivePage() {
         authors: formData.get('authors'),
         accession_id: formData.get('accession_id'),
         year: parseInt(formData.get('year')),
-        department_id: selectedDept, // UUID from state
-        embedding,
+        department_id: selectedDept,
+        embedding: embedding, // pgvector handles the array conversion
         status: 'archived'
       }]);
 
-      if (error) throw error;
+      if (error) {
+        if (error.code === '23505') throw new Error("Title or Accession ID already exists in archive.");
+        throw error;
+      }
 
-      setMessage({ type: 'success', text: '✅ RESEARCH ARCHIVED AND INDEXED SUCCESSFULLY!' });
+      setMessage({ type: 'success', text: '✅ RESEARCH ARCHIVED AND SEMANTICALLY INDEXED.' });
       e.target.reset();
       setSelectedDept('');
+      setSuggestedId('');
     } catch (err) {
       console.error("Archive Error:", err);
       setMessage({ type: 'error', text: `❌ ERROR: ${err.message}` });
@@ -109,7 +129,7 @@ export default function ResearchArchivePage() {
             <input 
               name="title" 
               required 
-              placeholder="e.g. SUSTAINABLE ARCHITECTURE IN TROPICAL CLIMATES" 
+              placeholder="e.g. BLOCKCHAIN-BASED VOTING SYSTEM" 
               className="w-full p-4 bg-white border-4 border-black font-bold text-black focus:bg-[#FFCC00] outline-none placeholder:text-gray-300" 
             />
           </div>
@@ -145,8 +165,10 @@ export default function ResearchArchivePage() {
               <input 
                 name="accession_id" 
                 required 
+                defaultValue={suggestedId}
+                key={suggestedId} // Force re-render when suggestion changes
                 placeholder="e.g. BSCS-2024-001" 
-                className="w-full p-4 bg-white border-4 border-black font-bold text-black focus:bg-[#FFCC00] outline-none placeholder:text-gray-300" 
+                className="w-full p-4 bg-white border-4 border-black font-bold text-black focus:bg-[#FFCC00] outline-none placeholder:text-gray-300 uppercase" 
               />
             </div>
           </div>
@@ -167,20 +189,19 @@ export default function ResearchArchivePage() {
               <input 
                 name="authors" 
                 required 
-                placeholder="Lastname, Firstname; Doe, Jane" 
+                placeholder="Doe, John; Smith, Jane" 
                 className="w-full p-4 bg-white border-4 border-black font-bold text-black focus:bg-[#FFCC00] outline-none placeholder:text-gray-300" 
               />
             </div>
           </div>
 
-          {/* Abstract */}
           <div className="space-y-2">
             <label className="text-xs font-black text-black uppercase tracking-widest">Abstract Text</label>
             <textarea 
               name="abstract_text" 
               required 
               rows={8} 
-              placeholder="Paste the full research abstract here for semantic analysis..." 
+              placeholder="Paste the full research abstract for vector mapping..." 
               className="w-full p-5 bg-white border-4 border-black font-medium text-black outline-none resize-none focus:bg-[#FFCC00] placeholder:text-gray-300" 
             />
           </div>
@@ -189,7 +210,7 @@ export default function ResearchArchivePage() {
             disabled={loading} 
             className="w-full py-6 bg-[#003366] text-white border-4 border-black font-black uppercase tracking-[0.3em] text-lg hover:translate-x-[4px] hover:translate-y-[4px] hover:shadow-none transition-all shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] disabled:opacity-50"
           >
-            {loading ? 'ARCHIVING...' : '🚀 ADD TO ARCHIVE'}
+            {loading ? 'PROCESSING VECTOR...' : '🚀 ADD TO ARCHIVE'}
           </button>
         </form>
 
