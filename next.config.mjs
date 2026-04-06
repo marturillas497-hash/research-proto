@@ -1,11 +1,5 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  transpilePackages: ['@xenova/transformers'],
-
-  experimental: {
-    serverComponentsExternalPackages: ['@xenova/transformers'],
-  },
-
   webpack: (config, { isServer }) => {
     if (!isServer) {
       config.resolve.fallback = {
