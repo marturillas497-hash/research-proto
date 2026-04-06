@@ -1,10 +1,24 @@
-//app/api/auth/register/ route.js
+// app/api/auth/register/route.js
+export const dynamic = 'force-dynamic';
 
-import { supabaseAdmin } from '@/lib/supabase/service';
 import { NextResponse } from 'next/server';
+import { createClient } from '@supabase/supabase-js';
 
 export async function POST(request) {
   try {
+    // 1. Initialize Supabase Admin INSIDE the handler
+    // This prevents the build-time error "supabaseUrl is required"
+    const supabaseAdmin = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL || '',
+      process.env.SUPABASE_SERVICE_ROLE_KEY || '',
+      {
+        auth: {
+          autoRefreshToken: false,
+          persistSession: false
+        }
+      }
+    );
+
     const body = await request.json();
     
     const { 
@@ -19,16 +33,15 @@ export async function POST(request) {
       section 
     } = body;
 
-    // 1. Validation Check
+    // 2. Validation Check
     if (!email || !password || !full_name || !department_id) {
       return NextResponse.json({ error: "Missing required profile fields" }, { status: 400 });
     }
 
-    // 2. The "UUID Shield" Logic
-    // If the string is empty or just whitespace, explicitly set to null
+    // 3. The "UUID Shield" Logic
     const cleanAdviserId = (adviser_id && adviser_id.trim() !== "") ? adviser_id : null;
 
-    // 3. Create Auth User via Admin Service Role
+    // 4. Create Auth User via Admin Service Role
     const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
       email,
       password,
@@ -38,7 +51,7 @@ export async function POST(request) {
         role,
         department_id,
         lrn: lrn || null, 
-        adviser_id: cleanAdviserId, // Crucial for optional UUID columns
+        adviser_id: cleanAdviserId,
         year_level: parseInt(year_level) || 1,
         section: section || 'N/A',
         status: role === 'research_adviser' ? 'pending' : 'active'
