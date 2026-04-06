@@ -5,21 +5,17 @@ import { NextResponse } from 'next/server';
 export async function middleware(request) {
   const { pathname } = request.nextUrl;
 
-  // 1. EXIT EARLY: Skip internal Next.js, static files, and the login page
+  // Only skip static files and Next.js internals
   if (
-    pathname.startsWith('/_next') || 
+    pathname.startsWith('/_next') ||
     pathname.startsWith('/api') ||
-    pathname === '/login' || 
     pathname.includes('.')
   ) {
     return NextResponse.next();
   }
 
-  // Create an unmodified response
   let response = NextResponse.next({
-    request: {
-      headers: request.headers,
-    },
+    request: { headers: request.headers },
   });
 
   try {
@@ -28,17 +24,13 @@ export async function middleware(request) {
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
       {
         cookies: {
-          getAll() {
-            return request.cookies.getAll();
-          },
+          getAll() { return request.cookies.getAll(); },
           setAll(cookiesToSet) {
             cookiesToSet.forEach(({ name, value, options }) =>
               request.cookies.set(name, value, options)
             );
             response = NextResponse.next({
-              request: {
-                headers: request.headers,
-              },
+              request: { headers: request.headers },
             });
             cookiesToSet.forEach(({ name, value, options }) =>
               response.cookies.set(name, value, options)
@@ -48,17 +40,16 @@ export async function middleware(request) {
       }
     );
 
-    // 2. AUTH CHECK
+    // Refresh session — critical for navbar to work
     const { data: { user } } = await supabase.auth.getUser();
 
-    const protectedPaths = ['/dashboard', '/admin', '/submit', '/library', '/profile'];
+    const protectedPaths = ['/dashboard', '/admin', '/submit', '/library', '/profile', '/adviser'];
     const isProtected = protectedPaths.some(p => pathname.startsWith(p));
 
     if (!user && isProtected) {
       return NextResponse.redirect(new URL('/login', request.url));
     }
 
-    // 3. PROFILE CHECK (Only if logged in)
     if (user) {
       const { data: profile } = await supabase
         .from('profiles')
@@ -66,25 +57,32 @@ export async function middleware(request) {
         .eq('id', user.id)
         .single();
 
-      // Handle Pending/Rejected status
+      // Pending/Rejected — redirect to login with error
       if (profile?.status === 'pending' || profile?.status === 'rejected') {
         const url = new URL('/login', request.url);
         url.searchParams.set('error', profile.status);
         return NextResponse.redirect(url);
       }
 
-      // Admin Protection
+      // Role-based guards
       if (pathname.startsWith('/admin') && profile?.role !== 'admin') {
         return NextResponse.redirect(new URL('/dashboard', request.url));
       }
-
-      // Student/Adviser Protection (Redirect away from /admin)
+      if (pathname.startsWith('/adviser') && profile?.role !== 'research_adviser') {
+        return NextResponse.redirect(new URL('/dashboard', request.url));
+      }
       if (pathname.startsWith('/dashboard') && profile?.role === 'admin') {
         return NextResponse.redirect(new URL('/admin', request.url));
       }
+
+      // Redirect active users away from login
+      if (pathname === '/login' && profile?.status === 'active') {
+        const dest = profile.role === 'admin' ? '/admin' :
+                     profile.role === 'research_adviser' ? '/adviser' : '/dashboard';
+        return NextResponse.redirect(new URL(dest, request.url));
+      }
     }
   } catch (error) {
-    // If something fails, we log it and let the request continue to avoid a 500
     console.error('Middleware Error:', error);
   }
 
