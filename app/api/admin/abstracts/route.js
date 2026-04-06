@@ -4,14 +4,26 @@ export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 import { requireAdmin } from '@/lib/api-auth';
 import { generateEmbedding } from '@/lib/embeddings';
-import { supabaseAdmin } from '@/lib/supabase/service';
+// 1. Import the creation function instead of the static instance
+import { createClient } from '@supabase/supabase-js'; 
 
 export async function POST(request) {
   try {
-    // 1. Auth Check
+    // 2. Auth Check
     await requireAdmin();
     
-    // 2. Parse Body
+    // 3. Initialize Supabase Admin ONLY inside the request handler
+    // This prevents the "supabaseUrl is required" error during build time
+    const supabaseAdmin = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL || '',
+      process.env.SUPABASE_SERVICE_ROLE_KEY || ''
+    );
+
+    if (!process.env.NEXT_PUBLIC_SUPABASE_URL) {
+      throw new Error("Database configuration is missing.");
+    }
+
+    // 4. Parse Body
     const body = await request.json();
     const { title, abstract_text, authors, year, department_id, accession_id } = body;
 
@@ -19,10 +31,10 @@ export async function POST(request) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
     }
 
-    // 3. Generate 384-dimension vector
+    // 5. Generate 384-dimension vector
     const embedding = await generateEmbedding(`${title} ${abstract_text}`);
 
-    // 4. Insert to Supabase
+    // 6. Insert to Supabase
     const { data, error } = await supabaseAdmin
       .from('abstracts')
       .insert([{
@@ -32,7 +44,7 @@ export async function POST(request) {
         year: parseInt(year),
         department_id,
         accession_id,
-        embedding // Vector data
+        embedding 
       }])
       .select();
 
