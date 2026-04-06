@@ -4,6 +4,12 @@ import { NextResponse } from 'next/server';
 
 export async function middleware(request) {
   let response = NextResponse.next({ request });
+  const path = request.nextUrl.pathname;
+
+  // 1. SKIP middleware for public assets and LOGIN page to prevent loops
+  if (path === '/login' || path.startsWith('/_next') || path.includes('.')) {
+    return response;
+  }
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -21,10 +27,9 @@ export async function middleware(request) {
   );
 
   const { data: { user } } = await supabase.auth.getUser();
-  const path = request.nextUrl.pathname;
 
-  // Protect sensitive routes [cite: 172-182]
-  const protectedPaths = ['/dashboard', '/adviser', '/admin', '/submit', '/library'];
+  // 2. Protect sensitive routes
+  const protectedPaths = ['/dashboard', '/admin', '/submit', '/library'];
   const isProtected = protectedPaths.some(p => path.startsWith(p));
 
   if (!user && isProtected) {
@@ -32,40 +37,29 @@ export async function middleware(request) {
   }
 
   if (user) {
+    // 3. Database Check (Try to keep this out of middleware if possible, 
+    // but if needed, we must handle the login loop)
     const { data: profile } = await supabase
       .from('profiles')
       .select('role, status')
       .eq('id', user.id)
       .single();
 
-    // 1. Handle Approval Status [cite: 153, 154]
-    if (profile?.status === 'pending' && path !== '/login') {
-      return NextResponse.redirect(new URL('/login?error=pending', request.url));
-    }
-    if (profile?.status === 'rejected' && path !== '/login') {
-      return NextResponse.redirect(new URL('/login?error=rejected', request.url));
+    // Handle non-active status
+    if (profile?.status === 'pending' || profile?.status === 'rejected') {
+      const errorQuery = profile.status === 'pending' ? 'pending' : 'rejected';
+      // Only redirect if NOT already at login (redundant here due to skip above, but safe)
+      return NextResponse.redirect(new URL(`/login?error=${errorQuery}`, request.url));
     }
 
-    // 2. Role-Based Redirects [cite: 155, 156, 157]
+    // Role-Based Access Control
     if (path.startsWith('/admin') && profile?.role !== 'admin') {
       return NextResponse.redirect(new URL('/dashboard', request.url));
     }
-    if (path.startsWith('/adviser') && profile?.role !== 'research_adviser') {
-      return NextResponse.redirect(new URL('/dashboard', request.url));
-    }
-    if (path === '/login' && profile?.status === 'active') {
-      const dest = profile.role === 'admin' ? '/admin' : profile.role === 'research_adviser' ? '/adviser' : '/dashboard';
-      return NextResponse.redirect(new URL(dest, request.url));
-    }
 
+    // Redirect admins away from student dashboard
     if (path.startsWith('/dashboard') && profile?.role === 'admin') {
       return NextResponse.redirect(new URL('/admin', request.url));
-    }
-
-    if (path === '/login' && profile?.status === 'active') {
-      const dest = profile.role === 'admin' ? '/admin' : 
-                  profile.role === 'research_adviser' ? '/adviser' : '/dashboard';
-      return NextResponse.redirect(new URL(dest, request.url));
     }
   }
 
@@ -73,5 +67,5 @@ export async function middleware(request) {
 }
 
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)'],
+  matcher: ['/((?!api|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)'],
 };

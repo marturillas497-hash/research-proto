@@ -4,23 +4,28 @@ export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 import { requireAdmin } from '@/lib/api-auth';
 import { generateEmbedding } from '@/lib/embeddings';
-// 1. Import the creation function instead of the static instance
 import { createClient } from '@supabase/supabase-js'; 
 
 export async function POST(request) {
   try {
-    // 2. Auth Check
+    // 1. Auth Check (Must be an Admin to index)
     await requireAdmin();
     
-    // 3. Initialize Supabase Admin ONLY inside the request handler
-    // This prevents the "supabaseUrl is required" error during build time
+    // 2. Initialize Supabase Admin inside the handler
     const supabaseAdmin = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL || '',
-      process.env.SUPABASE_SERVICE_ROLE_KEY || ''
+      process.env.SUPABASE_SERVICE_ROLE_KEY || '',
+      {
+        auth: {
+          autoRefreshToken: false,
+          persistSession: false
+        }
+      }
     );
 
-    if (!process.env.NEXT_PUBLIC_SUPABASE_URL) {
-      throw new Error("Database configuration is missing.");
+    // 3. Early exit if env vars are missing at runtime
+    if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+      throw new Error("Missing Supabase environment variables on server.");
     }
 
     // 4. Parse Body
@@ -31,7 +36,7 @@ export async function POST(request) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
     }
 
-    // 5. Generate 384-dimension vector
+    // 5. Generate 384-dimension vector (Matches your Vector DB config)
     const embedding = await generateEmbedding(`${title} ${abstract_text}`);
 
     // 6. Insert to Supabase
