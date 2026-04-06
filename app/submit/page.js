@@ -1,9 +1,9 @@
 // app/submit/page.js
-
 'use client';
 
 import { useState, useEffect } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import { generateEmbedding } from '@/lib/embeddings';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 
@@ -20,30 +20,25 @@ export default function StudentSubmitPage() {
     async function getProfile() {
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
-        // FIX: Explicitly specifying the relationship to avoid ambiguity
-        // If your foreign key column in student_metadata is named differently, 
-        // change '!profile_id' to match your column name.
         const { data: profile, error } = await supabase
           .from('profiles')
           .select(`
             full_name, 
             department_id, 
             departments(code),
-            student_metadata!profile_id(lrn, year_level)
+            student_metadata!student_metadata_profile_id_fkey(lrn, year_level)
           `)
           .eq('id', user.id)
           .single();
 
-        if (error) {
-          console.error("Profile Fetch Error:", error.message);
-          return;
-        }
+        if (error) { console.error("Profile Fetch Error:", error.message); return; }
 
         setUserProfile({
           ...profile,
           department_code: profile?.departments?.code || 'N/A',
-          // Accessing metadata from the joined object
-          metadata: profile?.student_metadata?.[0] || null
+          metadata: Array.isArray(profile?.student_metadata)
+            ? profile.student_metadata[0]
+            : profile?.student_metadata || null
         });
       }
     }
@@ -53,31 +48,38 @@ export default function StudentSubmitPage() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!userProfile?.department_id) return alert("Profile error: Department not found.");
-    
+
     setLoading(true);
-    setStatusMessage('MAPPING TOPIC VECTORS...');
 
     try {
-      await new Promise(resolve => setTimeout(resolve, 800));
-      setStatusMessage('CROSS-REFERENCING ARCHIVES...');
+      // Step 1: Generate embedding CLIENT-SIDE
+      setStatusMessage('MAPPING TOPIC VECTORS...');
+      const embedding = await generateEmbedding(`${formData.title}: ${formData.abstract}`);
 
+      if (!embedding || embedding.length !== 384) {
+        throw new Error('Vector generation failed. Please try again.');
+      }
+
+      // Step 2: Send pre-computed vector to API
+      setStatusMessage('CROSS-REFERENCING ARCHIVES...');
       const res = await fetch('/api/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           title: formData.title,
           description: formData.abstract,
+          embedding, // ← pre-computed, no server WASM needed
         }),
       });
+
+      setStatusMessage('CALCULATING RELEVANCE...');
 
       if (!res.ok) {
         const errorData = await res.json();
         throw new Error(errorData.error || "Analysis failed");
       }
 
-      setStatusMessage('CALCULATING RELEVANCE...');
       const report = await res.json();
-
       router.push(`/dashboard/report/${report.id}`);
     } catch (error) {
       console.error("Consultation Error:", error);
@@ -89,8 +91,8 @@ export default function StudentSubmitPage() {
 
   return (
     <div className="max-w-4xl mx-auto p-6 sm:p-10 bg-[#F0F0F0] min-h-screen font-sans selection:bg-[#FFCC00]">
-      <Link 
-        href="/dashboard" 
+      <Link
+        href="/dashboard"
         className="inline-block border-4 border-black bg-white px-6 py-2 font-black text-xs uppercase shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:bg-[#FFCC00] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all mb-8"
       >
         ← Back to Dashboard
@@ -102,16 +104,14 @@ export default function StudentSubmitPage() {
             <h1 className="text-5xl font-black text-[#003366] uppercase tracking-tighter italic leading-none">
               Research <br /> Consultant
             </h1>
-            <div className="text-right">
-               <span className="bg-black text-white px-3 py-1 font-black text-[10px] uppercase tracking-widest italic">
-                v2.0 Beta
-              </span>
-            </div>
+            <span className="bg-black text-white px-3 py-1 font-black text-[10px] uppercase tracking-widest italic">
+              v2.0 Beta
+            </span>
           </div>
-          
+
           <div className="mt-6 flex flex-wrap gap-4">
             <p className="text-xs font-black uppercase text-black">
-              Scope: 
+              Scope:
               <span className="bg-[#FFCC00] px-2 border-2 border-black ml-2 inline-block">
                 {userProfile?.department_code || 'LOADING...'}
               </span>
@@ -155,9 +155,9 @@ export default function StudentSubmitPage() {
           <button
             type="submit"
             disabled={loading || !userProfile}
-            className={`w-full py-6 border-4 border-black font-black uppercase tracking-[0.3em] text-xl transition-all relative overflow-hidden
-              ${loading 
-                ? 'bg-slate-100 text-slate-400 cursor-not-allowed' 
+            className={`w-full py-6 border-4 border-black font-black uppercase tracking-[0.3em] text-xl transition-all
+              ${loading
+                ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
                 : 'bg-[#003366] text-white shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] hover:translate-x-[4px] hover:translate-y-[4px] hover:shadow-none'
               }`}
           >
@@ -175,7 +175,7 @@ export default function StudentSubmitPage() {
 
       <div className="mt-8 flex flex-col items-center gap-2">
         <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest text-center">
-          Powered by Semantic Vector Search
+          Powered by Semantic Vector Search & Gemini AI
         </p>
         <div className="flex gap-2">
           <div className="h-2 w-2 bg-green-500 border border-black rounded-full animate-pulse" />
