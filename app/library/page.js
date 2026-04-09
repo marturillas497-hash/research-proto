@@ -38,7 +38,6 @@ export default function LibraryPage() {
       const { data: depts } = await supabase.from('departments').select('*').order('code');
       setDepartments(depts || []);
 
-      // Pulls from the 'abstracts' table and joins the 'abstract_stats' view
       const { data: initial } = await supabase
         .from('abstracts')
         .select('*, abstract_stats(unique_readers)')
@@ -52,35 +51,51 @@ export default function LibraryPage() {
     loadData();
   }, [supabase]);
 
-  // --- 2. UNIQUE VIEW TRACKING ---
-  const handleOpenItem = async (item) => {
+  // --- 2. UNIQUE VIEW TRACKING (3-SECOND DWELL LOGIC) ---
+  useEffect(() => {
+    // We only trigger this if an item is selected and a profile exists
+    if (!selectedItem || !profile) return;
+
+    const logTimer = setTimeout(async () => {
+      try {
+        const { error } = await supabase
+          .from('abstract_views')
+          .upsert(
+            { 
+              abstract_id: selectedItem.id, 
+              viewer_id: profile.id // Updated to match your ERD (viewer_id)
+            },
+            { onConflict: 'abstract_id, viewer_id' }
+          );
+
+        if (error) throw error;
+        console.log("3s dwell reached: Unique view verified for", selectedItem.title);
+      } catch (err) {
+        console.error("Tracking error:", err.message);
+      }
+    }, 3000);
+
+    return () => clearTimeout(logTimer);
+  }, [selectedItem, profile, supabase]);
+
+  const handleOpenItem = (item) => {
     setSelectedItem(item);
-    
-    if (profile) {
-      // Log the view uniquely using UPSERT on the repaired schema
-      await supabase
-        .from('abstract_views')
-        .upsert(
-          { abstract_id: item.id, profile_id: profile.id },
-          { onConflict: 'abstract_id, profile_id' }
-        );
-    }
   };
 
-  // --- 3. THE HYBRID SEARCH LOGIC ---
+  // --- 3. HYBRID SEARCH LOGIC ---
   useEffect(() => {
     if (isSemanticActive) return;
 
-    const query = search.trim();
+    const query = search.trim().toLowerCase();
     const wordCount = query.split(/\s+/).filter(w => w.length > 0).length;
 
+    // Fast local filter for short queries
     if (wordCount < 3) {
       const filtered = allAbstracts.filter(item => {
-        const searchTerm = query.toLowerCase();
         const matchesKeyword =
-          item.title.toLowerCase().includes(searchTerm) ||
-          item.abstract_text.toLowerCase().includes(searchTerm) ||
-          (item.authors && item.authors.toLowerCase().includes(searchTerm));
+          item.title.toLowerCase().includes(query) ||
+          item.abstract_text.toLowerCase().includes(query) ||
+          (item.authors && item.authors.toLowerCase().includes(query));
 
         const matchesDept = filters.dept ? item.department_id === filters.dept : true;
         return matchesKeyword && matchesDept;
@@ -126,6 +141,7 @@ export default function LibraryPage() {
     if (!error) {
       setSelectedItem(null);
       setAllAbstracts(prev => prev.filter(item => item.id !== id));
+      setDisplayAbstracts(prev => prev.filter(item => item.id !== id));
     }
   };
 
@@ -147,7 +163,14 @@ export default function LibraryPage() {
       
       setIsEditing(false);
       setSelectedItem(null);
-      setAllAbstracts(prev => prev.map(item => item.id === selectedItem.id ? { ...item, ...updatedFields, embedding } : item));
+      
+      // Update local state to reflect changes instantly
+      const updatedList = allAbstracts.map(item => 
+        item.id === selectedItem.id ? { ...item, ...updatedFields, embedding } : item
+      );
+      setAllAbstracts(updatedList);
+      setDisplayAbstracts(updatedList);
+      
     } catch (err) {
       alert(err.message);
     } finally {
@@ -189,6 +212,7 @@ export default function LibraryPage() {
           )}
         </header>
 
+        {/* SEARCH FORM */}
         <section className="mb-12">
           <form onSubmit={handleSearchTrigger} className="grid grid-cols-1 md:grid-cols-4 gap-4 bg-white p-6 border-4 border-black shadow-[10px_10px_0px_0px_black]">
             <div className="md:col-span-2 relative">
@@ -227,6 +251,7 @@ export default function LibraryPage() {
           </div>
         </section>
 
+        {/* RESULTS GRID */}
         <section className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-20">
           {displayAbstracts.map((item) => (
             <div 
@@ -265,7 +290,7 @@ export default function LibraryPage() {
           ))}
         </section>
 
-        {/* --- MODAL VIEW / EDIT --- */}
+        {/* MODAL VIEW / EDIT */}
         {selectedItem && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-[#003366]/80 backdrop-blur-md">
             <div className="bg-white w-full max-w-4xl max-h-[90vh] overflow-y-auto border-4 border-black shadow-[20px_20px_0px_0px_#FFCC00] p-6 sm:p-12 relative">
@@ -335,12 +360,10 @@ export default function LibraryPage() {
                           )}
                         </div>
                         
-                        {/* UNIQUE VIEW COUNTER */}
                         {!isEditing && (
                           <div className="pt-4 border-t border-slate-700">
                              <label className="text-[9px] font-black text-[#00FF66] uppercase block">Unique Citations</label>
                              <p className="text-xl font-black font-mono">
-                               {/* Accessing the count from the abstract_stats join */}
                                {selectedItem.abstract_stats?.[0]?.unique_readers || 0}
                              </p>
                           </div>

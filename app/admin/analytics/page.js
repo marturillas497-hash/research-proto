@@ -6,47 +6,60 @@ import Link from 'next/link';
 export default async function AdminAnalyticsPage() {
   const supabase = await createClient();
 
-  // 1. Fetch Top 10 "Famous" (All-time views)
-  const { data: famous } = await supabase
-    .from('similarity_reports')
-    .select('id, input_title, view_count, student_id, profiles(full_name)')
-    .order('view_count', { ascending: false })
-    .limit(10);
+  // 1. Fetch All-Time Highs (Famous List)
+  // We pull from 'abstracts' and join our view 'abstract_stats'
+  const { data: famousRaw } = await supabase
+    .from('abstracts')
+    .select(`
+      id, 
+      title, 
+      authors, 
+      abstract_stats(unique_readers)
+    `);
 
-  // 2. Fetch "Trending" (Views in the last 7 days)
-  const { data: trending } = await supabase
+  // Process views and sort in JS to handle the view join structure
+  const famous = (famousRaw || [])
+    .map(item => ({
+      id: item.id,
+      title: item.title,
+      views: item.abstract_stats?.[0]?.unique_readers || 0
+    }))
+    .sort((a, b) => b.views - a.views)
+    .slice(0, 10);
+
+  // 2. Fetch Trending (Velocity in the last 30 days)
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  const { data: trendingRaw } = await supabase
     .from('abstract_views')
     .select(`
       abstract_id,
-      similarity_reports(input_title, view_count)
+      abstracts(title)
     `)
-    .gte('viewed_at', new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString());
+    .gte('viewed_at', thirtyDaysAgo);
 
-  // Aggregate trending counts in JS for simplicity, or use a complex RPC
+  // Aggregate trending counts
   const trendingMap = {};
-  trending?.forEach(v => {
+  trendingRaw?.forEach(v => {
     const id = v.abstract_id;
-    trendingMap[id] = (trendingMap[id] || 0) + 1;
-    trendingMap[id + '_title'] = v.similarity_reports?.input_title;
+    if (!trendingMap[id]) {
+      trendingMap[id] = { title: v.abstracts?.title || 'Unknown', count: 0 };
+    }
+    trendingMap[id].count++;
   });
 
-  const sortedTrending = Object.keys(trendingMap)
-    .filter(key => !key.endsWith('_title'))
-    .map(id => ({
-      id,
-      title: trendingMap[id + '_title'],
-      recent_views: trendingMap[id]
-    }))
-    .sort((a, b) => b.recent_views - a.recent_views)
+  const sortedTrending = Object.values(trendingMap)
+    .sort((a, b) => b.count - a.count)
     .slice(0, 5);
 
-  // 3. Fetch Recent Audit Log (Last 20 views)
+  const maxTrendingCount = sortedTrending[0]?.count || 1;
+
+  // 3. System Audit Ledger (Real-time stream)
   const { data: history } = await supabase
     .from('abstract_views')
     .select(`
       viewed_at,
       profiles(full_name),
-      similarity_reports(input_title)
+      abstracts(title)
     `)
     .order('viewed_at', { ascending: false })
     .limit(20);
@@ -71,26 +84,37 @@ export default async function AdminAnalyticsPage() {
         </header>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-12">
-          {/* TRENDING SECTION */}
+          
+          {/* TRENDING SECTION WITH VISUAL BARS */}
           <div className="lg:col-span-1 space-y-8">
             <section className="bg-[#FFCC00] p-6 border-4 border-black shadow-[8px_8px_0px_0px_black]">
               <h2 className="font-black uppercase text-xl mb-4 italic underline">Trending_Now</h2>
-              <p className="text-[10px] font-bold uppercase mb-4 opacity-70">(Last 7 Days Activity)</p>
-              <div className="space-y-4">
+              <p className="text-[10px] font-bold uppercase mb-6 opacity-70">(Month-to-Date Activity)</p>
+              
+              <div className="space-y-6">
                 {sortedTrending.map((item, i) => (
-                  <div key={i} className="flex justify-between items-center border-b-2 border-black/20 pb-2">
-                    <span className="text-xs font-black uppercase truncate pr-4">{item.title}</span>
-                    <span className="bg-black text-white px-2 py-1 text-[10px] font-mono">+{item.recent_views}</span>
+                  <div key={i} className="space-y-2">
+                    <div className="flex justify-between items-end text-[10px] font-black uppercase">
+                      <span className="truncate w-3/4">{item.title}</span>
+                      <span className="bg-black text-white px-1">+{item.count}</span>
+                    </div>
+                    {/* The Visual Chart Bar */}
+                    <div className="w-full h-3 bg-black/10 border border-black/20">
+                      <div 
+                        className="h-full bg-black transition-all duration-1000"
+                        style={{ width: `${(item.count / maxTrendingCount) * 100}%` }}
+                      ></div>
+                    </div>
                   </div>
                 ))}
-                {sortedTrending.length === 0 && <p className="text-xs italic font-bold">No recent velocity detected.</p>}
+                {sortedTrending.length === 0 && <p className="text-xs italic font-bold">No velocity detected in this window.</p>}
               </div>
             </section>
 
             <section className="bg-[#003366] p-6 border-4 border-black shadow-[8px_8px_0px_0px_black] text-white">
               <h2 className="font-black uppercase text-xl mb-4 italic text-[#FFCC00]">Total_Interactions</h2>
-              <p className="text-6xl font-black italic">{trending?.length || 0}</p>
-              <p className="text-[10px] font-black uppercase mt-2 text-[#FFCC00]/60 tracking-widest text-right">Events_Logged</p>
+              <p className="text-6xl font-black italic">{trendingRaw?.length || 0}</p>
+              <p className="text-[10px] font-black uppercase mt-2 text-[#FFCC00]/60 tracking-widest text-right">Events_Logged_30D</p>
             </section>
           </div>
 
@@ -106,15 +130,15 @@ export default async function AdminAnalyticsPage() {
                     <tr>
                       <th className="p-4 text-[10px] font-black uppercase">Rank</th>
                       <th className="p-4 text-[10px] font-black uppercase">Project Title</th>
-                      <th className="p-4 text-[10px] font-black uppercase text-right">Total Views</th>
+                      <th className="p-4 text-[10px] font-black uppercase text-right">Unique Readers</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y-2 divide-slate-200">
-                    {famous?.map((item, i) => (
-                      <tr key={item.id} className="hover:bg-[#FFCC00]/10 group">
+                    {famous.map((item, i) => (
+                      <tr key={item.id} className="hover:bg-[#FFCC00]/10 group transition-colors">
                         <td className="p-4 font-mono text-xl font-black italic text-slate-300">#0{i+1}</td>
-                        <td className="p-4 text-xs font-black uppercase group-hover:text-[#003366]">{item.input_title}</td>
-                        <td className="p-4 text-right font-black text-2xl italic text-[#003366]">{item.view_count || 0}</td>
+                        <td className="p-4 text-xs font-black uppercase group-hover:text-[#003366]">{item.title}</td>
+                        <td className="p-4 text-right font-black text-2xl italic text-[#003366]">{item.views}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -128,7 +152,7 @@ export default async function AdminAnalyticsPage() {
         <section className="bg-white border-4 border-black shadow-[15px_15px_0px_0px_black] overflow-hidden">
           <div className="bg-black p-4 flex justify-between items-center">
             <h2 className="text-[#FFCC00] font-black uppercase tracking-widest text-sm italic">System_Audit_Ledger</h2>
-            <span className="text-[9px] font-mono text-white/40 uppercase">Streaming_Data_Active</span>
+            <span className="text-[9px] font-mono text-white/40 uppercase animate-pulse">Streaming_Data_Active</span>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
@@ -141,7 +165,7 @@ export default async function AdminAnalyticsPage() {
               </thead>
               <tbody className="divide-y-2 divide-slate-100">
                 {history?.map((log, i) => (
-                  <tr key={i} className="text-[11px] font-bold uppercase tracking-tight">
+                  <tr key={i} className="text-[11px] font-bold uppercase tracking-tight hover:bg-slate-50">
                     <td className="p-4 font-mono text-slate-400">
                       {new Date(log.viewed_at).toLocaleString()}
                     </td>
@@ -149,7 +173,7 @@ export default async function AdminAnalyticsPage() {
                       {log.profiles?.full_name || 'System_User'}
                     </td>
                     <td className="p-4 italic">
-                      {log.similarity_reports?.input_title}
+                      {log.abstracts?.title}
                     </td>
                   </tr>
                 ))}
