@@ -3,11 +3,6 @@ import { createClient } from '@/lib/supabase/server';
 import AdminNavbar from '@/components/admin/Navbar';
 import Link from 'next/link';
 
-/**
- * Helper to calculate the 30-day window.
- * Moving this outside the component prevents the 'impure function' error 
- * during the React render cycle in Next.js build.
- */
 function getThirtyDaysAgo() {
   return new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
 }
@@ -16,8 +11,6 @@ export default async function AdminAnalyticsPage() {
   const supabase = await createClient();
   const thirtyDaysAgo = getThirtyDaysAgo();
 
-  // 1. Fetch All-Time Highs
-  // We pull from 'abstracts' and join the 'abstract_stats' view
   const { data: famousRaw } = await supabase
     .from('abstracts')
     .select(`
@@ -35,7 +28,6 @@ export default async function AdminAnalyticsPage() {
     .sort((a, b) => b.views - a.views)
     .slice(0, 10);
 
-  // 2. Fetch Trending Velocity (Last 30 Days)
   const { data: trendingRaw } = await supabase
     .from('abstract_views')
     .select(`
@@ -44,7 +36,6 @@ export default async function AdminAnalyticsPage() {
     `)
     .gte('viewed_at', thirtyDaysAgo);
 
-  // Aggregate trending counts manually
   const trendingMap = {};
   trendingRaw?.forEach(v => {
     const id = v.abstract_id;
@@ -60,7 +51,6 @@ export default async function AdminAnalyticsPage() {
 
   const maxTrendingCount = sortedTrending[0]?.count || 1;
 
-  // 3. System Audit Ledger
   const { data: history } = await supabase
     .from('abstract_views')
     .select(`
@@ -87,13 +77,12 @@ export default async function AdminAnalyticsPage() {
             </p>
           </div>
           <Link href="/admin" className="bg-black text-white px-8 py-4 font-black uppercase text-xs shadow-[6px_6px_0px_0px_#FFCC00] hover:shadow-none hover:translate-x-1 hover:translate-y-1 transition-all">
-            ← Return to Control
+            &larr; Return to Control
           </Link>
         </header>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-12">
           
-          {/* TRENDING SECTION */}
           <div className="lg:col-span-1 space-y-8">
             <section className="bg-[#FFCC00] p-8 border-4 border-black shadow-[10px_10px_0px_0px_black]">
               <h2 className="font-black uppercase text-2xl mb-2 italic underline">Trending_Now</h2>
@@ -134,7 +123,6 @@ export default async function AdminAnalyticsPage() {
             </section>
           </div>
 
-          {/* ALL-TIME HIGHS */}
           <div className="lg:col-span-2">
             <section className="bg-white border-4 border-black shadow-[15px_15px_0px_0px_black] overflow-hidden flex flex-col h-full">
               <div className="bg-black p-5 flex justify-between items-center">
@@ -171,7 +159,6 @@ export default async function AdminAnalyticsPage() {
           </div>
         </div>
 
-        {/* AUDIT LEDGER */}
         <section className="bg-white border-4 border-black shadow-[20px_20px_0px_0px_black] overflow-hidden mb-20">
           <div className="bg-black p-5 flex justify-between items-center">
             <h2 className="text-[#FFCC00] font-black uppercase tracking-[0.2em] text-xs italic">System_Audit_Ledger</h2>
@@ -199,7 +186,7 @@ export default async function AdminAnalyticsPage() {
                       {log.profiles?.full_name || 'Anonymous_Node'}
                     </td>
                     <td className="p-5 italic opacity-80 max-w-xs truncate">
-                      "{log.abstracts?.title}"
+                      &quot;{log.abstracts?.title}&quot;
                     </td>
                   </tr>
                 ))}
