@@ -9,6 +9,11 @@ export default function ApprovalButtons({ adviserId }) {
   const router = useRouter();
 
   const updateStatus = async (status) => {
+    // Basic confirmation for rejections to prevent accidental clicks
+    if (status === 'rejected' && !confirm('Are you sure you want to reject this faculty application?')) {
+      return;
+    }
+
     setLoading(true);
     try {
       const res = await fetch('/api/admin/approvals', {
@@ -16,30 +21,44 @@ export default function ApprovalButtons({ adviserId }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ adviserId, status }),
       });
-      if (!res.ok) throw new Error('Failed to update');
+
+      const result = await res.json();
+
+      if (!res.ok) {
+        throw new Error(result.error || 'Failed to update status');
+      }
+
+      // Force Next.js to re-fetch the server-side data (the pending list)
       router.refresh();
+      
     } catch (err) {
-      alert(err.message);
+      console.error('Approval Action Error:', err);
+      alert(`System Error: ${err.message}`);
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="flex gap-3 items-center">
+    <div className="flex flex-col sm:flex-row gap-4 items-center">
+      {/* APPROVE BUTTON */}
       <button
         onClick={() => updateStatus('active')}
         disabled={loading}
-        className="bg-green-400 border-4 border-black px-6 py-3 font-black uppercase text-sm shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all disabled:opacity-50"
+        className="w-full sm:w-auto bg-[#00FF66] border-4 border-black px-8 py-3 font-black uppercase text-xs tracking-widest shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] hover:translate-x-[3px] hover:translate-y-[3px] hover:shadow-none transition-all disabled:opacity-50 disabled:cursor-not-allowed group flex items-center justify-center gap-2"
       >
-        ✅ Approve
+        <span>{loading ? 'PROCESSING...' : 'Approve Faculty'}</span>
+        {!loading && <span className="text-lg">✓</span>}
       </button>
+
+      {/* REJECT BUTTON */}
       <button
         onClick={() => updateStatus('rejected')}
         disabled={loading}
-        className="bg-red-500 text-white border-4 border-black px-6 py-3 font-black uppercase text-sm shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all disabled:opacity-50"
+        className="w-full sm:w-auto bg-white text-red-600 border-4 border-black px-8 py-3 font-black uppercase text-xs tracking-widest shadow-[6px_6px_0px_0px_rgba(220,38,38,1)] hover:translate-x-[3px] hover:translate-y-[3px] hover:shadow-none transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
       >
-        ✕ Reject
+        <span>{loading ? '...' : 'Reject'}</span>
+        {!loading && <span className="text-lg">✕</span>}
       </button>
     </div>
   );

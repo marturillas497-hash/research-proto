@@ -5,14 +5,19 @@ import { useState, useEffect } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { generateEmbedding } from '@/lib/embeddings';
 
+// Component Imports
+import AdminNavbar from '@/components/admin/Navbar';
+import AdviserNavbar from '@/components/adviser/AdviserNavbar';
+import StudentNavbar from '@/components/student/StudentNavbar';
+
 export default function LibraryPage() {
-  const [allAbstracts, setAllAbstracts] = useState([]); 
-  const [displayAbstracts, setDisplayAbstracts] = useState([]); 
+  const [allAbstracts, setAllAbstracts] = useState([]);
+  const [displayAbstracts, setDisplayAbstracts] = useState([]);
   const [departments, setDepartments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filters, setFilters] = useState({ dept: '' });
-  
+
   const [profile, setProfile] = useState(null);
   const [selectedItem, setSelectedItem] = useState(null);
   const [isEditing, setIsEditing] = useState(false);
@@ -21,7 +26,48 @@ export default function LibraryPage() {
 
   const supabase = createClient();
 
-  // --- 1. THE HYBRID SEARCH LOGIC ---
+  // --- 1. INITIAL DATA LOAD ---
+  useEffect(() => {
+    async function loadData() {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const { data: prof } = await supabase.from('profiles').select('*').eq('id', user.id).single();
+        setProfile(prof);
+      }
+      
+      const { data: depts } = await supabase.from('departments').select('*').order('code');
+      setDepartments(depts || []);
+
+      // Pulls from the 'abstracts' table and joins the 'abstract_stats' view
+      const { data: initial } = await supabase
+        .from('abstracts')
+        .select('*, abstract_stats(unique_readers)')
+        .order('created_at', { ascending: false })
+        .limit(50);
+      
+      setAllAbstracts(initial || []);
+      setDisplayAbstracts(initial || []);
+      setLoading(false);
+    }
+    loadData();
+  }, [supabase]);
+
+  // --- 2. UNIQUE VIEW TRACKING ---
+  const handleOpenItem = async (item) => {
+    setSelectedItem(item);
+    
+    if (profile) {
+      // Log the view uniquely using UPSERT on the repaired schema
+      await supabase
+        .from('abstract_views')
+        .upsert(
+          { abstract_id: item.id, profile_id: profile.id },
+          { onConflict: 'abstract_id, profile_id' }
+        );
+    }
+  };
+
+  // --- 3. THE HYBRID SEARCH LOGIC ---
   useEffect(() => {
     if (isSemanticActive) return;
 
@@ -31,11 +77,11 @@ export default function LibraryPage() {
     if (wordCount < 3) {
       const filtered = allAbstracts.filter(item => {
         const searchTerm = query.toLowerCase();
-        const matchesKeyword = 
-          item.title.toLowerCase().includes(searchTerm) || 
+        const matchesKeyword =
+          item.title.toLowerCase().includes(searchTerm) ||
           item.abstract_text.toLowerCase().includes(searchTerm) ||
           (item.authors && item.authors.toLowerCase().includes(searchTerm));
-        
+
         const matchesDept = filters.dept ? item.department_id === filters.dept : true;
         return matchesKeyword && matchesDept;
       });
@@ -45,7 +91,7 @@ export default function LibraryPage() {
 
   const handleSearchTrigger = async (e) => {
     if (e) e.preventDefault();
-    
+
     const query = search.trim();
     const wordCount = query.split(/\s+/).filter(w => w.length > 0).length;
 
@@ -57,7 +103,7 @@ export default function LibraryPage() {
 
         const { data, error } = await supabase.rpc('match_abstracts', {
           query_embedding: queryVector,
-          match_threshold: 0.18, 
+          match_threshold: 0.18,
           match_count: 25,
           filter_dept: filters.dept || null
         });
@@ -73,25 +119,7 @@ export default function LibraryPage() {
     }
   };
 
-  // --- 2. INITIAL DATA LOAD ---
-  useEffect(() => {
-    async function loadData() {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        const { data: prof } = await supabase.from('profiles').select('*').eq('id', user.id).single();
-        setProfile(prof);
-      }
-      const { data: depts } = await supabase.from('departments').select('*').order('code');
-      setDepartments(depts || []);
-      
-      const { data: initial } = await supabase.from('abstracts').select('*').order('created_at', { ascending: false }).limit(50);
-      setAllAbstracts(initial || []);
-      setLoading(false);
-    }
-    loadData();
-  }, [supabase]);
-
-  // --- 3. ADMIN ACTIONS ---
+  // --- 4. ADMIN ACTIONS ---
   const handleDelete = async (id) => {
     if (!confirm("🚨 Delete this research permanently?")) return;
     const { error } = await supabase.from('abstracts').delete().eq('id', id);
@@ -116,6 +144,7 @@ export default function LibraryPage() {
       const embedding = await generateEmbedding(`${updatedFields.title}: ${updatedFields.abstract_text}`);
       const { error } = await supabase.from('abstracts').update({ ...updatedFields, embedding }).eq('id', selectedItem.id);
       if (error) throw error;
+      
       setIsEditing(false);
       setSelectedItem(null);
       setAllAbstracts(prev => prev.map(item => item.id === selectedItem.id ? { ...item, ...updatedFields, embedding } : item));
@@ -127,154 +156,234 @@ export default function LibraryPage() {
   };
 
   return (
-    <div className="max-w-7xl mx-auto p-6 sm:p-10 font-sans text-[#003366]">
-      <header className="mb-10 flex justify-between items-start">
-        <div>
-          <h1 className="text-4xl font-black uppercase italic tracking-tighter">Research Library</h1>
-          <div className="flex items-center gap-2 mt-2">
-            <div className={`h-2 w-2 rounded-full ${isSemanticActive ? 'bg-emerald-500 animate-pulse' : 'bg-slate-300'}`}></div>
-            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
-              {isSemanticActive ? 'Deep Topic Search Active' : 'Live Filtering'}
-            </p>
-          </div>
-        </div>
-        {isSemanticActive && (
-          <button 
-            onClick={() => {setSearch(''); setIsSemanticActive(false);}}
-            className="text-[10px] font-black border-2 border-[#003366] px-3 py-1 uppercase hover:bg-[#FFCC00] transition-colors"
-          >
-            Clear Results ✕
-          </button>
-        )}
-      </header>
+    <div className="min-h-screen bg-[#F0F0F0] selection:bg-[#FFCC00]">
+      {profile?.role === 'admin' && <AdminNavbar />}
+      {profile?.role === 'research_adviser' && <AdviserNavbar profile={profile} />}
+      {profile?.role === 'student' && <StudentNavbar profile={profile} />}
 
-      {/* --- SEARCH FORM --- */}
-      <form onSubmit={handleSearchTrigger} className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4 bg-white p-4 border-4 border-[#003366] shadow-[8px_8px_0px_0px_rgba(0,51,102,1)]">
-        <input
-          type="text"
-          placeholder="Search topics or titles..."
-          className="md:col-span-2 p-4 font-bold outline-none bg-slate-50 text-[#003366]"
-          value={search}
-          onChange={(e) => {
-            setSearch(e.target.value);
-            if (e.target.value === '') setIsSemanticActive(false);
-          }}
-        />
-        <select 
-          className="p-4 font-bold outline-none bg-slate-50 text-[#003366]"
-          value={filters.dept}
-          onChange={(e) => setFilters({dept: e.target.value})}
-        >
-          <option value="">All Departments</option>
-          {departments.map(d => <option key={d.id} value={d.id}>{d.code}</option>)}
-        </select>
-        <button type="submit" className="bg-[#003366] text-[#FFCC00] font-black uppercase tracking-widest hover:brightness-110 active:scale-95 transition-all">
-          {loading ? '...' : 'Search'}
-        </button>
-      </form>
-
-      {/* --- RE-WRITTEN USER NOTE --- */}
-      <div className="px-4 mb-10 flex items-center gap-3">
-        <div className="flex space-x-1">
-          <div className="w-1 h-1 bg-[#003366] rounded-full animate-bounce"></div>
-          <div className="w-1 h-1 bg-[#003366] rounded-full animate-bounce [animation-delay:0.2s]"></div>
-        </div>
-        <p className="text-[10px] font-bold uppercase tracking-tight text-slate-500">
-          💡 <span className="text-[#003366]">Pro Tip:</span> Enter <span className="bg-[#FFCC00] text-black px-1 font-black">3+ words</span> to search by topic relevance instead of just exact matches.
-        </p>
-      </div>
-
-      {/* --- RESULTS --- */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-        {displayAbstracts.map((item) => (
-          <div 
-            key={item.id} 
-            onClick={() => setSelectedItem(item)}
-            className="cursor-pointer bg-white p-8 border-4 border-[#003366] shadow-[6px_6px_0px_0px_rgba(0,51,102,1)] hover:translate-y-[-4px] hover:shadow-[10px_10px_0px_0px_rgba(0,51,102,1)] transition-all flex flex-col h-full"
-          >
-            <div className="flex justify-between items-start mb-4">
-              <span className="text-[9px] font-black bg-[#003366] text-white px-2 py-1 uppercase">
-                {departments.find(d => d.id === item.department_id)?.code}
+      <main className="max-w-7xl mx-auto p-6 sm:p-10">
+        
+        <header className="mb-10 flex flex-col md:flex-row justify-between items-start md:items-end gap-6 border-b-8 border-black pb-8">
+          <div>
+            <div className="flex items-center gap-3 mb-2">
+              <span className="bg-[#FFCC00] border-2 border-black px-3 py-1 text-[10px] font-black uppercase shadow-[3px_3px_0px_0px_black]">
+                Library Access: {profile?.role?.replace('_', ' ') || 'Guest'}
               </span>
-              {item.similarity && (
-                <span className="text-[9px] font-black text-emerald-600 bg-emerald-50 px-2 py-1 border border-emerald-200 uppercase italic">
-                  {Math.round(item.similarity * 100)}% Topic Match
-                </span>
-              )}
+              <div className={`h-2 w-2 border border-black ${isSemanticActive ? 'bg-[#00FF66] animate-pulse' : 'bg-slate-300'}`}></div>
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 font-mono">
+                {isSemanticActive ? 'Semantic_Engine_Online' : 'Standard_Filter_Mode'}
+              </p>
             </div>
-            <h3 className="font-black uppercase text-base mb-4 leading-tight text-[#003366] line-clamp-2">{item.title}</h3>
-            <p className="text-xs text-slate-500 line-clamp-4 leading-relaxed mb-6">{item.abstract_text}</p>
-            <div className="mt-auto pt-4 border-t-2 border-slate-50 flex justify-between items-center">
-              <span className="text-[9px] font-black text-slate-300 uppercase truncate w-2/3">By {item.authors}</span>
-              <span className="text-[#003366] font-black text-[10px]">READ MORE →</span>
-            </div>
+            <h1 className="text-7xl md:text-8xl font-black text-[#003366] tracking-tighter uppercase leading-[0.8] italic">
+              Research_Archive
+            </h1>
           </div>
-        ))}
-        {displayAbstracts.length === 0 && (
-          <div className="col-span-full py-20 text-center border-4 border-dashed border-slate-200 rounded-xl">
-             <p className="font-black text-slate-300 uppercase tracking-widest">No matching research found</p>
-          </div>
-        )}
-      </div>
 
-      {/* --- MODAL VIEW / EDIT (Remains unchanged for admin) --- */}
-      {selectedItem && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-[#003366]/90 backdrop-blur-sm">
-          <div className="bg-white w-full max-w-3xl max-h-[90vh] overflow-y-auto border-4 border-[#003366] shadow-[15px_15px_0px_0px_rgba(255,204,0,1)] p-10 relative">
-            <button onClick={() => {setSelectedItem(null); setIsEditing(false);}} className="absolute top-6 right-6 font-black text-xl hover:rotate-90 transition-transform">✕</button>
-            
-            <form onSubmit={handleUpdate}>
-              <div className="mb-8">
-                {isEditing ? (
-                  <input name="title" defaultValue={selectedItem.title} className="w-full text-2xl font-black text-[#003366] uppercase p-4 bg-slate-50 border-b-4 border-[#FFCC00] outline-none" />
-                ) : (
-                  <h2 className="text-3xl font-black text-[#003366] uppercase leading-tight">{selectedItem.title}</h2>
+          {isSemanticActive && (
+            <button 
+              onClick={() => {setSearch(''); setIsSemanticActive(false); setDisplayAbstracts(allAbstracts);}}
+              className="bg-black text-white px-6 py-3 text-xs font-black uppercase shadow-[4px_4px_0px_0px_#FFCC00] hover:shadow-none hover:translate-x-1 hover:translate-y-1 transition-all"
+            >
+              Reset Archive ✕
+            </button>
+          )}
+        </header>
+
+        <section className="mb-12">
+          <form onSubmit={handleSearchTrigger} className="grid grid-cols-1 md:grid-cols-4 gap-4 bg-white p-6 border-4 border-black shadow-[10px_10px_0px_0px_black]">
+            <div className="md:col-span-2 relative">
+              <input
+                type="text"
+                placeholder="Query topics, titles, or authors..."
+                className="w-full p-4 font-black uppercase text-sm outline-none bg-slate-50 border-2 border-black focus:bg-white transition-colors"
+                value={search}
+                onChange={(e) => {
+                  setSearch(e.target.value);
+                  if (e.target.value === '') {
+                    setIsSemanticActive(false);
+                    setDisplayAbstracts(allAbstracts);
+                  }
+                }}
+              />
+            </div>
+            <select 
+              className="p-4 font-black uppercase text-xs outline-none bg-slate-50 border-2 border-black appearance-none cursor-pointer"
+              value={filters.dept}
+              onChange={(e) => setFilters({dept: e.target.value})}
+            >
+              <option value="">All Departments</option>
+              {departments.map(d => <option key={d.id} value={d.id}>{d.code}</option>)}
+            </select>
+            <button type="submit" className="bg-[#003366] text-[#FFCC00] border-2 border-black font-black uppercase tracking-widest hover:bg-black transition-all shadow-[4px_4px_0px_0px_black] active:shadow-none active:translate-x-1 active:translate-y-1">
+              {loading ? 'Processing...' : 'Execute Search'}
+            </button>
+          </form>
+
+          <div className="mt-4 px-2 flex items-center gap-3">
+             <span className="text-[10px] font-black bg-[#FFCC00] border border-black px-2 italic">PRO TIP</span>
+             <p className="text-[10px] font-black uppercase tracking-tight text-slate-500 font-mono">
+               Input <span className="text-black underline">3+ words</span> to activate Neural Semantic Mapping.
+             </p>
+          </div>
+        </section>
+
+        <section className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-20">
+          {displayAbstracts.map((item) => (
+            <div 
+              key={item.id} 
+              onClick={() => handleOpenItem(item)}
+              className="group cursor-pointer bg-white p-8 border-4 border-black shadow-[8px_8px_0px_0px_black] hover:translate-y-[-4px] hover:shadow-[12px_12px_0px_0px_#FFCC00] transition-all flex flex-col h-full relative overflow-hidden"
+            >
+              <div className="flex justify-between items-start mb-6">
+                <span className="text-[9px] font-black bg-black text-white px-2 py-1 uppercase tracking-tighter">
+                  {departments.find(d => d.id === item.department_id)?.code || 'GEN'}
+                </span>
+                {item.similarity && (
+                  <span className="text-[9px] font-black text-[#003366] bg-[#FFCC00] px-2 py-1 border border-black uppercase italic shadow-[2px_2px_0px_0px_black]">
+                    {Math.round(item.similarity * 100)}% Match
+                  </span>
                 )}
               </div>
-
-              <div className="space-y-6">
-                <div>
-                  <h4 className="text-[10px] font-black text-slate-300 uppercase tracking-widest mb-2">Research Abstract</h4>
-                  {isEditing ? (
-                    <textarea name="abstract_text" rows={10} defaultValue={selectedItem.abstract_text} className="w-full p-6 bg-slate-50 border-2 border-[#003366] outline-none text-sm" />
-                  ) : (
-                    <p className="text-sm text-slate-700 leading-relaxed bg-slate-50 p-6 whitespace-pre-wrap italic">{selectedItem.abstract_text}</p>
-                  )}
-                </div>
-                
-                <div className="grid grid-cols-2 gap-6">
-                  <div className="flex flex-col">
-                    <span className="text-[10px] font-black text-slate-300 uppercase mb-1">Authors</span>
-                    {isEditing ? <input name="authors" defaultValue={selectedItem.authors} className="p-3 bg-slate-50 font-bold outline-none" /> : <span className="font-bold text-[#003366] uppercase">{selectedItem.authors}</span>}
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="text-[10px] font-black text-slate-300 uppercase mb-1">Year</span>
-                    {isEditing ? <input name="year" defaultValue={selectedItem.year} className="p-3 bg-slate-50 font-bold outline-none" /> : <span className="font-bold text-[#003366]">{selectedItem.year}</span>}
-                  </div>
-                </div>
+              
+              <h3 className="font-black uppercase text-lg mb-4 leading-[1.1] text-[#003366] group-hover:italic transition-all">
+                {item.title}
+              </h3>
+              
+              <p className="text-xs text-black font-medium line-clamp-4 leading-relaxed mb-8 border-l-2 border-slate-200 pl-4">
+                {item.abstract_text}
+              </p>
+              
+              <div className="mt-auto pt-4 border-t-4 border-black flex justify-between items-center">
+                <span className="text-[9px] font-black text-slate-400 uppercase truncate w-2/3 font-mono">
+                  REF://{item.authors}
+                </span>
+                <span className="text-black font-black text-[10px] group-hover:translate-x-2 transition-transform">
+                  VIEW_FILE →
+                </span>
               </div>
+            </div>
+          ))}
+        </section>
 
-              {profile?.role === 'admin' && (
-                <div className="mt-10 pt-8 border-t-4 border-slate-50 flex gap-4">
-                  {!isEditing ? (
-                    <>
-                      <button type="button" onClick={() => handleDelete(selectedItem.id)} className="px-6 py-3 bg-red-50 text-red-600 font-black uppercase text-[10px] hover:bg-red-600 hover:text-white transition-all">Delete Record</button>
-                      <button type="button" onClick={() => setIsEditing(true)} className="flex-1 px-6 py-3 bg-[#003366] text-white font-black uppercase text-[10px] shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]">Edit Details</button>
-                    </>
+        {/* --- MODAL VIEW / EDIT --- */}
+        {selectedItem && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-[#003366]/80 backdrop-blur-md">
+            <div className="bg-white w-full max-w-4xl max-h-[90vh] overflow-y-auto border-4 border-black shadow-[20px_20px_0px_0px_#FFCC00] p-6 sm:p-12 relative">
+              <button 
+                onClick={() => {setSelectedItem(null); setIsEditing(false);}} 
+                className="absolute top-6 right-6 font-black text-2xl hover:rotate-90 transition-transform bg-black text-white w-10 h-10 flex items-center justify-center"
+              >
+                ✕
+              </button>
+              
+              <form onSubmit={handleUpdate}>
+                <div className="mb-10 border-b-8 border-black pb-6">
+                  <span className="text-[10px] font-black text-slate-400 uppercase font-mono block mb-2">Research Dossier #{selectedItem.id.slice(0,8)}</span>
+                  {isEditing ? (
+                    <input 
+                      name="title" 
+                      defaultValue={selectedItem.title} 
+                      className="w-full text-3xl font-black text-[#003366] uppercase p-4 bg-slate-50 border-4 border-black outline-none" 
+                    />
                   ) : (
-                    <>
-                      <button type="button" onClick={() => setIsEditing(false)} className="px-6 py-3 bg-slate-100 text-slate-500 font-black uppercase text-[10px]">Cancel</button>
-                      <button type="submit" disabled={saveLoading} className="flex-1 px-6 py-3 bg-green-600 text-white font-black uppercase text-[10px] shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]">
-                        {saveLoading ? 'Updating Topic Map...' : 'Save Updates'}
-                      </button>
-                    </>
+                    <h2 className="text-4xl sm:text-5xl font-black text-[#003366] uppercase leading-[0.9] italic tracking-tighter">
+                      {selectedItem.title}
+                    </h2>
                   )}
                 </div>
-              )}
-            </form>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-10">
+                  <div className="md:col-span-2 space-y-8">
+                    <div>
+                      <h4 className="text-[10px] font-black text-black bg-[#FFCC00] border border-black inline-block px-2 uppercase tracking-widest mb-4">
+                        Executive Summary
+                      </h4>
+                      {isEditing ? (
+                        <textarea 
+                          name="abstract_text" 
+                          rows={12} 
+                          defaultValue={selectedItem.abstract_text} 
+                          className="w-full p-6 bg-slate-50 border-4 border-black outline-none text-sm font-medium leading-relaxed" 
+                        />
+                      ) : (
+                        <p className="text-sm sm:text-base text-black leading-relaxed font-medium bg-[#F9F9F9] p-8 border-2 border-black italic">
+                          {selectedItem.abstract_text}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="space-y-6">
+                    <div className="bg-black text-white p-6 border-4 border-black shadow-[6px_6px_0px_0px_#003366]">
+                      <span className="text-[9px] font-black text-[#FFCC00] uppercase block mb-4 tracking-[0.2em]">Metadata_Stats</span>
+                      
+                      <div className="space-y-4">
+                        <div>
+                          <label className="text-[9px] font-black text-slate-400 uppercase block">Principal Authors</label>
+                          {isEditing ? (
+                            <input name="authors" defaultValue={selectedItem.authors} className="w-full p-2 bg-white text-black font-bold outline-none border-2 border-[#FFCC00] text-xs mt-1" />
+                          ) : (
+                            <p className="font-black uppercase text-sm tracking-tight">{selectedItem.authors}</p>
+                          )}
+                        </div>
+                        <div>
+                          <label className="text-[9px] font-black text-slate-400 uppercase block">Publication Year</label>
+                          {isEditing ? (
+                            <input name="year" defaultValue={selectedItem.year} className="w-full p-2 bg-white text-black font-bold outline-none border-2 border-[#FFCC00] text-xs mt-1" />
+                          ) : (
+                            <p className="font-black text-2xl italic">{selectedItem.year}</p>
+                          )}
+                        </div>
+                        
+                        {/* UNIQUE VIEW COUNTER */}
+                        {!isEditing && (
+                          <div className="pt-4 border-t border-slate-700">
+                             <label className="text-[9px] font-black text-[#00FF66] uppercase block">Unique Citations</label>
+                             <p className="text-xl font-black font-mono">
+                               {/* Accessing the count from the abstract_stats join */}
+                               {selectedItem.abstract_stats?.[0]?.unique_readers || 0}
+                             </p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {profile?.role === 'admin' && (
+                  <div className="mt-12 pt-8 border-t-8 border-black flex flex-col sm:flex-row gap-4">
+                    {!isEditing ? (
+                      <>
+                        <button type="button" onClick={() => handleDelete(selectedItem.id)} className="px-8 py-4 bg-[#FF3333] text-white border-4 border-black font-black uppercase text-xs shadow-[6px_6px_0px_0px_black] hover:shadow-none hover:translate-x-1 hover:translate-y-1 transition-all">
+                          Purge Record
+                        </button>
+                        <button type="button" onClick={() => setIsEditing(true)} className="flex-1 px-8 py-4 bg-white text-black border-4 border-black font-black uppercase text-xs shadow-[6px_6px_0px_0px_black] hover:bg-[#FFCC00] transition-all">
+                          Modify Documentation
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button type="button" onClick={() => setIsEditing(false)} className="px-8 py-4 bg-slate-200 border-4 border-black font-black uppercase text-xs">
+                          Abort Changes
+                        </button>
+                        <button type="submit" disabled={saveLoading} className="flex-1 px-8 py-4 bg-[#00FF66] text-black border-4 border-black font-black uppercase text-xs shadow-[6px_6px_0px_0px_black]">
+                          {saveLoading ? 'Re-Mapping Neural Vectors...' : 'Commit Updates to Archive'}
+                        </button>
+                      </>
+                    )}
+                  </div>
+                )}
+              </form>
+            </div>
           </div>
-        </div>
-      )}
+        )}
+
+        <footer className="mt-20 mb-10 text-center border-t-2 border-slate-200 pt-10">
+          <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.5em]">
+            System_Library_Access // Proto-Research_Node_01
+          </p>
+        </footer>
+      </main>
     </div>
   );
 }

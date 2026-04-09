@@ -18,7 +18,7 @@ export default async function AdviserReportView({ params }) {
       profiles!student_id (
         full_name,
         departments (name),
-        student_metadata (lrn, year_level, section)
+        student_metadata (id_number, year_level, section)
       )
     `)
     .eq('id', id)
@@ -97,7 +97,7 @@ export default async function AdviserReportView({ params }) {
               <p className="text-[10px] font-black uppercase text-slate-400">Student Name</p>
               <p className="font-black text-lg uppercase">{student?.full_name || '—'}</p>
               <p className="text-xs font-bold text-slate-500 uppercase">
-                {student?.student_metadata?.lrn || 'No LRN'}
+                {student?.student_metadata?.id_number || 'No id_number'}
               </p>
               <p className="text-xs font-bold text-slate-400 uppercase mt-1">
                 {student?.student_metadata?.year_level} — {student?.student_metadata?.section}

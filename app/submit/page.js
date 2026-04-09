@@ -26,7 +26,7 @@ export default function StudentSubmitPage() {
             full_name, 
             department_id, 
             departments(code),
-            student_metadata!student_metadata_profile_id_fkey(lrn, year_level)
+            student_metadata!student_metadata_profile_id_fkey(id_number, year_level)
           `)
           .eq('id', user.id)
           .single();

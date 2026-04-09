@@ -8,7 +8,6 @@ export default function EditProfileModal({ profile, onClose, onRefresh }) {
   const [selectedAdviser, setSelectedAdviser] = useState(profile.adviser_id || '');
   const [loading, setLoading] = useState(false);
   
-  // Memoize the supabase client to prevent unnecessary re-renders/effect triggers
   const supabase = useMemo(() => createClient(), []);
 
   // Fetch advisers for the student's department
@@ -30,14 +29,18 @@ export default function EditProfileModal({ profile, onClose, onRefresh }) {
 
   const handleUpdate = async () => {
     setLoading(true);
+    
+    // UPDATED: Target student_metadata where the link lives
     const { error } = await supabase
-      .from('profiles')
+      .from('student_metadata')
       .update({ adviser_id: selectedAdviser || null })
-      .eq('id', profile.id);
+      .eq('profile_id', profile.id);
 
     if (!error) {
       onRefresh(); 
       onClose();   
+    } else {
+      console.error("Database Sync Error:", error.message);
     }
     setLoading(false);
   };
@@ -48,8 +51,8 @@ export default function EditProfileModal({ profile, onClose, onRefresh }) {
       <div className="bg-[#F0F0F0] w-full max-w-md border-4 border-black p-8 shadow-[12px_12px_0px_0px_rgba(0,0,0,1)] relative overflow-hidden">
         
         {/* Accent Corner Stamped Pattern */}
-        <div className="absolute -top-6 -right-6 font-black text-6xl italic opacity-5 select-none pointer-events-none">
-          EDIT
+        <div className="absolute -top-6 -right-6 font-black text-6xl italic opacity-5 select-none pointer-events-none uppercase">
+          {profile?.role || 'User'}
         </div>
 
         <h2 className="text-3xl font-black text-black uppercase italic tracking-tighter mb-8 flex items-center gap-3">
@@ -72,7 +75,7 @@ export default function EditProfileModal({ profile, onClose, onRefresh }) {
                 <option value="" className="bg-white">-- NO ADVISER ASSIGNED --</option>
                 {advisers.map(adv => (
                   <option key={adv.id} value={adv.id} className="bg-white">
-                    {adv.full_name}
+                    {adv.full_name.toUpperCase()}
                   </option>
                 ))}
               </select>
@@ -83,7 +86,7 @@ export default function EditProfileModal({ profile, onClose, onRefresh }) {
             </div>
 
             <div className="mt-4 p-3 bg-black text-white text-[9px] font-bold uppercase tracking-widest leading-tight">
-              Scope: {profile.department_code || 'N/A'} DEPARTMENT ONLY
+              Scope: {profile.department_code || 'GNR'} DEPARTMENT ONLY
             </div>
           </div>
 

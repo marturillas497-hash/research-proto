@@ -27,7 +27,7 @@ export async function POST(request) {
       full_name, 
       role, 
       department_id, 
-      lrn,           
+      id_number,           
       adviser_id,   
       year_level, 
       section 
@@ -50,7 +50,7 @@ export async function POST(request) {
         full_name,
         role,
         department_id,
-        lrn: lrn || null, 
+        id_number: id_number || null, 
         adviser_id: cleanAdviserId,
         year_level: parseInt(year_level) || 1,
         section: section || 'N/A',

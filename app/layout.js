@@ -1,7 +1,6 @@
 // app/layout.js
 import "./globals.css";
 import { createClient } from "@/lib/supabase/server";
-import Navbar from "@/components/Navbar";
 
 export const metadata = {
   title: "Proto-Research | MIST",
@@ -11,11 +10,11 @@ export const metadata = {
 export default async function RootLayout({ children }) {
   const supabase = await createClient();
   
-  // Fetch the current user session
+  // We still fetch the user and profile in case child components need it via the server,
+  // but we are removing the Navbar that was causing the crash.
   const { data: { user } } = await supabase.auth.getUser();
   let profile = null;
 
-  // If a user is logged in, get their profile and department info
   if (user) {
     const { data } = await supabase
       .from('profiles')
@@ -27,9 +26,12 @@ export default async function RootLayout({ children }) {
 
   return (
     <html lang="en">
-      <body>
-        {/* We pass the profile to the Navbar so it can show the right links */}
-        <Navbar profile={profile} />
+      <body className="antialiased">
+        {/* REMOVED: The global Navbar import and logic.
+            The Admin pages will now manually render their own AdminNavbar.
+            The Student/User pages can use their specific headers (like UserHeader.js).
+        */}
+        
         <main className="min-h-screen bg-gray-50">
           {children}
         </main>

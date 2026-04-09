@@ -21,7 +21,7 @@ export default function LoginPage() {
     role: 'student',
     department_id: '', 
     adviser_id: '', 
-    lrn: '', // Updated from student_id to match normalized schema
+    id_number: '', // Updated from student_id to match normalized schema
     year_level: '', 
     section: ''
   });
@@ -200,10 +200,10 @@ export default function LoginPage() {
 
                   <input
                     type="text"
-                    placeholder="LRN (Learner Reference No.)"
+                    placeholder="id_number (Learner Reference No.)"
                     className="w-full p-4 bg-slate-50 border-none rounded-2xl font-medium"
                     required
-                    onChange={(e) => setFormData({ ...formData, lrn: e.target.value })}
+                    onChange={(e) => setFormData({ ...formData, id_number: e.target.value })}
                   />
                   <div className="grid grid-cols-2 gap-3">
                     <input

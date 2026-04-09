@@ -24,7 +24,7 @@ export async function POST(request) {
       .select(`
         full_name,
         departments (code, name),
-        student_metadata!student_metadata_profile_id_fkey (lrn, adviser_id)
+        student_metadata!student_metadata_profile_id_fkey (id_number, adviser_id)
       `)
       .eq('id', user.id)
       .single();

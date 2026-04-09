@@ -11,7 +11,7 @@ export default function ProfilePage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState({ type: '', text: '' });
-  const [formData, setFormData] = useState({ lrn: '', year_level: '', section: '' });
+  const [formData, setFormData] = useState({ id_number: '', year_level: '', section: '' });
 
   const supabase = createClient();
 
@@ -35,7 +35,7 @@ export default function ProfilePage() {
       setProfile(prof);
       setMetadata(meta);
       setFormData({
-        lrn: meta?.lrn || '',
+        id_number: meta?.id_number || '',
         year_level: meta?.year_level || '',
         section: meta?.section || '',
       });
@@ -57,7 +57,7 @@ export default function ProfilePage() {
         const { error } = await supabase
           .from('student_metadata')
           .update({
-            lrn: formData.lrn || null,
+            id_number: formData.id_number || null,
             year_level: formData.year_level || null,
             section: formData.section || null,
           })
@@ -69,7 +69,7 @@ export default function ProfilePage() {
           .from('student_metadata')
           .insert({
             profile_id: user.id,
-            lrn: formData.lrn || null,
+            id_number: formData.id_number || null,
             year_level: formData.year_level || null,
             section: formData.section || null,
           });
@@ -149,12 +149,12 @@ export default function ProfilePage() {
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               <div className="space-y-2">
-                <label className="text-[10px] font-black uppercase tracking-widest">LRN</label>
+                <label className="text-[10px] font-black uppercase tracking-widest">id_number</label>
                 <input
                   type="text"
                   placeholder="e.g. 123456789012"
-                  value={formData.lrn}
-                  onChange={(e) => setFormData({ ...formData, lrn: e.target.value })}
+                  value={formData.id_number}
+                  onChange={(e) => setFormData({ ...formData, id_number: e.target.value })}
                   className="w-full p-4 border-4 border-black font-bold outline-none focus:bg-[#FFCC00] placeholder:text-slate-300"
                 />
               </div>
